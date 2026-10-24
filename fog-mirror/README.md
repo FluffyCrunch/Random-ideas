@@ -48,5 +48,5 @@ Then open http://localhost:8000.
 Hosted on Netlify. From the repo root:
 
 ```bash
-netlify deploy --prod --dir fog-mirror --site fog-mirror-fluffycrunch
+netlify deploy --prod --dir fog-mirror --site f4a0d6a6-e8b3-4107-809a-ead75ea9442b
 ```

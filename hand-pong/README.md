@@ -55,5 +55,5 @@ Then open http://localhost:8000.
 Hosted on Netlify. From the repo root:
 
 ```bash
-netlify deploy --prod --dir hand-pong --site hand-pong-fluffycrunch
+netlify deploy --prod --dir hand-pong --site f771d0d9-0d4b-4d58-8bef-6189f48cafdc
 ```
