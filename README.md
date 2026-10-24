@@ -11,6 +11,7 @@ No big roadmaps, no ten-step plans. Just me playing with code, trying things out
 | Idea | What it does | Try it |
 | --- | --- | --- |
 | [🌫️ Fog Mirror](fog-mirror/) | Turns your webcam into a steamy bathroom mirror you wipe clean with your hand | [Live ↗](https://fog-mirror-fluffycrunch.netlify.app) |
+| [🏓 Hand Pong](hand-pong/) | Pong where your hand is the controller: wave at the webcam to beat the CPU | [Live ↗](https://hand-pong-fluffycrunch.netlify.app) |
 
 *More coming whenever the next random idea hits.*
 
@@ -22,7 +23,7 @@ No big roadmaps, no ten-step plans. Just me playing with code, trying things out
 
 ## 🛠️ Things I play with
 
-HTML · CSS · JavaScript · Canvas · computer vision in the browser · whatever looks fun this week
+HTML · CSS · JavaScript · Canvas · computer vision in the browser · tiny browser games · whatever looks fun this week
 
 ## 💬 Say hi
 
