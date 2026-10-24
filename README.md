@@ -1,21 +1,29 @@
-# Random ideas
+# 🧪 Random ideas
 
-A collection of small, fun experiments. Each idea lives in its own folder with its own README and live demo.
+Hey, welcome to my playground. 👋
 
-## Ideas
+This is where I dump the random stuff I build when an idea won't leave my head. Sometimes it starts with a reel, sometimes with a "wait, could I make that?" thought at 2 AM. Either way, it ends up here.
 
-| Idea | What it is | Live |
+No big roadmaps, no ten-step plans. Just me playing with code, trying things out, and shipping small experiments that are fun to use.
+
+## 🗂️ The idea dump
+
+| Idea | What it does | Try it |
 | --- | --- | --- |
-| [🌫️ Fog Mirror](fog-mirror/) | Your webcam as a steamy mirror you wipe clean with your hand | [Try it](https://fog-mirror-fluffycrunch.netlify.app) |
+| [🌫️ Fog Mirror](fog-mirror/) | Turns your webcam into a steamy bathroom mirror you wipe clean with your hand | [Live ↗](https://fog-mirror-fluffycrunch.netlify.app) |
 
-## Adding a new idea
+*More coming whenever the next random idea hits.*
 
-1. Create a folder for it, e.g. `my-new-idea/`.
-2. Put the code and a `README.md` describing it inside that folder.
-3. Deploy it to Netlify from the repo root:
+## 🧩 How this place works
 
-   ```bash
-   netlify deploy --prod --dir my-new-idea --site-name my-new-idea-fluffycrunch
-   ```
+- **One idea, one folder.** Each experiment lives in its own folder with its own code and README.
+- **Everything is live.** Every idea is deployed, so you can try it in your browser instead of just reading about it.
+- **Small and finished beats big and perfect.** If it works and it's fun, it ships.
 
-4. Add a row to the table above with the live link.
+## 🛠️ Things I play with
+
+HTML · CSS · JavaScript · Canvas · computer vision in the browser · whatever looks fun this week
+
+## 💬 Say hi
+
+Got a random idea I should build? Open an issue and throw it at me. 🎯
