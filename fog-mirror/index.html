@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fog Mirror</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: crosshair; }
+  video { display: none; }
+  :root {
+    --ink: #1a1a2e;
+    --paper: #fff7d6;
+    --yellow: #ffd93d;
+    --pink: #ff6b9d;
+    --cyan: #4ddbff;
+    --lime: #9bf06b;
+  }
+
+  /* ---- Comic panel ---- */
+  #hud {
+    position: fixed; left: 18px; bottom: 18px; width: 250px;
+    font-family: 'Fredoka', 'Segoe UI Emoji', 'Apple Color Emoji', system-ui, sans-serif; font-weight: 500; font-size: 14px; color: var(--ink);
+    background:
+      radial-gradient(circle, rgba(26,26,46,.09) 1.2px, transparent 1.5px) 0 0 / 9px 9px,
+      var(--paper);
+    border: 3px solid var(--ink); border-radius: 18px;
+    box-shadow: 6px 6px 0 var(--ink);
+    padding: 0 14px 12px; user-select: none;
+    transform: rotate(-1.5deg);
+    transition: transform .25s cubic-bezier(.34,1.56,.64,1);
+    animation: popIn .5s cubic-bezier(.34,1.56,.64,1);
+  }
+  #hud:hover { transform: rotate(0deg) scale(1.02); }
+
+  .hud-title {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: -16px -6px 8px;
+  }
+  .hud-title h1 {
+    margin: 0; font: 400 26px 'Bangers', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', cursive; letter-spacing: 1.5px;
+    color: var(--yellow); -webkit-text-stroke: 1.5px var(--ink);
+    text-shadow: 3px 3px 0 var(--ink);
+    background: var(--pink); border: 3px solid var(--ink); border-radius: 12px;
+    padding: 2px 12px; transform: rotate(-3deg);
+  }
+  .icon-btn {
+    width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--ink);
+    background: var(--cyan); font-size: 16px; cursor: pointer; box-shadow: 2px 2px 0 var(--ink);
+    transition: transform .15s;
+  }
+  .icon-btn:hover { transform: rotate(15deg) scale(1.1); }
+  .icon-btn:active { transform: translate(2px, 2px); box-shadow: none; }
+
+  .hud-body { display: grid; gap: 9px; }
+  #hud.collapsed .hud-body { display: none; }
+  #hud.collapsed { padding-bottom: 4px; }
+
+  /* Hand status: a small speech bubble floating at the top of the mirror */
+  #handBadge {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    font-family: 'Fredoka', 'Segoe UI Emoji', 'Apple Color Emoji', system-ui, sans-serif;
+    color: var(--ink); pointer-events: none; user-select: none; white-space: nowrap;
+    animation: popIn .5s cubic-bezier(.34,1.56,.64,1);
+  }
+  #handStatus {
+    display: inline-block; padding: 5px 14px; border: 3px solid var(--ink); border-radius: 999px;
+    background: #fff; font-weight: 600; font-size: 14px; box-shadow: 3px 3px 0 var(--ink);
+    transition: background .3s;
+  }
+  #handStatus.on { background: var(--lime); }
+  #handStatus.bounce { animation: bounce .4s cubic-bezier(.34,1.56,.64,1); }
+
+  #hud label { display: grid; gap: 3px; font-weight: 600; }
+  #hud select {
+    font: 600 14px 'Fredoka', sans-serif; color: var(--ink);
+    background: var(--yellow); border: 2.5px solid var(--ink); border-radius: 10px;
+    padding: 4px 8px; box-shadow: 2px 2px 0 var(--ink); cursor: pointer;
+  }
+
+  /* Chunky sliders */
+  #hud input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 14px;
+    background: #fff; border: 2.5px solid var(--ink); border-radius: 999px; cursor: pointer; }
+  #hud input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px;
+    border-radius: 50%; background: var(--pink); border: 3px solid var(--ink); transition: transform .15s; }
+  #hud input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.25); }
+  #hud input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%;
+    background: var(--pink); border: 3px solid var(--ink); }
+
+  .actions { display: flex; gap: 8px; margin-top: 2px; }
+  .comic-btn {
+    flex: 1; font: 400 18px 'Bangers', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', cursive; letter-spacing: 1px; color: var(--ink);
+    background: var(--cyan); border: 3px solid var(--ink); border-radius: 12px;
+    box-shadow: 3px 3px 0 var(--ink); padding: 5px 8px; cursor: pointer;
+    transition: transform .12s, box-shadow .12s;
+  }
+  .comic-btn:hover { transform: translate(-1px, -1px) rotate(-2deg); box-shadow: 4px 4px 0 var(--ink); }
+  .comic-btn:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--ink); }
+  .comic-btn.pink { background: var(--pink); }
+
+  .tip { font-size: 12px; opacity: .75; }
+  kbd {
+    font: 600 11px 'Fredoka', sans-serif; background: #fff; border: 2px solid var(--ink);
+    border-radius: 6px; padding: 0 5px; box-shadow: 1px 1px 0 var(--ink);
+  }
+
+  @keyframes popIn { from { transform: scale(.3) rotate(-12deg); opacity: 0; } }
+  @keyframes bounce { 40% { transform: scale(1.25) rotate(-4deg); } }
+
+  /* ---- Start screen ---- */
+  #start {
+    position: fixed; inset: 0; display: grid; place-items: center; color: var(--ink);
+    background:
+      radial-gradient(circle, rgba(26,26,46,.12) 2px, transparent 2.5px) 0 0 / 16px 16px,
+      var(--yellow);
+    font-family: 'Fredoka', sans-serif;
+  }
+  #start h1 {
+    margin: 0 0 22px; text-align: center; font: 400 clamp(52px, 11vw, 110px)/0.9 'Bangers', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', cursive;
+    letter-spacing: 3px; color: #fff; -webkit-text-stroke: 3px var(--ink);
+    text-shadow: 6px 6px 0 var(--pink), 9px 9px 0 var(--ink); transform: rotate(-4deg);
+  }
+  #start button { display: block; margin: 0 auto; font-size: 26px; padding: 10px 28px; }
+  #start p { text-align: center; margin-top: 18px; font-size: 15px; font-weight: 500; }
+</style>
+</head>
+<body>
+<video id="video" playsinline muted></video>
+<canvas id="screen"></canvas>
+
+<div id="hud">
+  <div class="hud-title">
+    <h1>FOG MIRROR!</h1>
+    <button class="icon-btn" id="toggleHud" title="Hide (H)">👀</button>
+  </div>
+  <div class="hud-body">
+    <label>🧽 Wipe with
+      <select id="wipeMode">
+        <option value="palm">Whole hand</option>
+        <option value="fingers">All fingers</option>
+        <option value="finger">Just one finger</option>
+      </select>
+    </label>
+    <label>🖌️ Brush size <input id="brush" type="range" min="20" max="160" value="70"></label>
+    <label>💨 Fog comeback <input id="refog" type="range" min="0" max="20" value="4"></label>
+    <div class="actions">
+      <button class="comic-btn" id="refogBtn">💨 Fog it!</button>
+      <button class="comic-btn pink" id="snapBtn">📸 Snap!</button>
+    </div>
+    <div class="tip">Wave a hand or drag the mouse · <kbd>R</kbd> fog · <kbd>H</kbd> hide</div>
+  </div>
+</div>
+
+<div id="handBadge"><span id="handStatus">⏳ Loading hand tracker…</span></div>
+
+<div id="start">
+  <div>
+    <h1>FOG<br>MIRROR!</h1>
+    <button class="comic-btn pink" id="go">🌫️ Breathe on it!</button>
+    <p>Needs your camera. Nothing leaves your device.</p>
+  </div>
+</div>
+
+<script type="module">
+const video = document.getElementById('video');
+const screen = document.getElementById('screen');
+const ctx = screen.getContext('2d');
+
+// Offscreen layers
+const fog = document.createElement('canvas');   // frosted copy of the camera
+const fogCtx = fog.getContext('2d');
+const mask = document.createElement('canvas');  // where the glass has been wiped (opaque = clear)
+const maskCtx = mask.getContext('2d');
+const tiny = document.createElement('canvas');  // low-res copy used for a cheap blur
+const tinyCtx = tiny.getContext('2d');
+
+const brushInput = document.getElementById('brush');
+const refogInput = document.getElementById('refog');
+const handStatus = document.getElementById('handStatus');
+
+let shownStatus = '';
+function setStatus(text) {
+  if (text === shownStatus) return;
+  shownStatus = text;
+  handStatus.textContent = text;
+}
+// The "lost" message waits this long so dropped frames don't make the bubble flicker
+const LOST_AFTER_MS = 1000;
+let lastHandSeen = 0;
+
+let W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+let drips = [];
+let lastPoint = { mouse: null, hand: null };
+
+function resize() {
+  W = Math.floor(innerWidth * dpr);
+  H = Math.floor(innerHeight * dpr);
+  for (const c of [screen, fog]) { c.width = W; c.height = H; }
+  // Keep existing wipes when resizing
+  const old = document.createElement('canvas');
+  old.width = mask.width; old.height = mask.height;
+  if (mask.width) old.getContext('2d').drawImage(mask, 0, 0);
+  mask.width = W; mask.height = H;
+  if (old.width) maskCtx.drawImage(old, 0, 0, W, H);
+  tiny.width = Math.max(64, Math.round(W / 14));
+  tiny.height = Math.max(36, Math.round(H / 14));
+}
+addEventListener('resize', resize);
+resize();
+
+// Object-fit: cover, mirrored horizontally
+function coverRect() {
+  const vw = video.videoWidth || 16, vh = video.videoHeight || 9;
+  const s = Math.max(W / vw, H / vh);
+  const dw = vw * s, dh = vh * s;
+  return { x: (W - dw) / 2, y: (H - dh) / 2, w: dw, h: dh };
+}
+function drawMirrored(c, target, tw, th) {
+  const r = coverRect();
+  const sx = tw / W, sy = th / H;
+  c.save();
+  c.translate(tw, 0);
+  c.scale(-1, 1);
+  c.drawImage(target, r.x * sx, r.y * sy, r.w * sx, r.h * sy);
+  c.restore();
+}
+
+// ---- Wiping ----
+function wipe(from, to, size) {
+  maskCtx.save();
+  maskCtx.globalCompositeOperation = 'source-over';
+  maskCtx.lineCap = 'round';
+  maskCtx.lineJoin = 'round';
+  maskCtx.strokeStyle = 'rgba(255,255,255,0.95)';
+  maskCtx.shadowColor = '#fff';
+  maskCtx.shadowBlur = size * 0.35;
+  maskCtx.lineWidth = size;
+  maskCtx.beginPath();
+  maskCtx.moveTo(from.x, from.y);
+  maskCtx.lineTo(to.x, to.y);
+  maskCtx.stroke();
+  maskCtx.restore();
+
+  // Water collects at the edge of a wipe and occasionally runs down
+  if (Math.random() < 0.06) {
+    drips.push({
+      x: to.x + (Math.random() - 0.5) * size,
+      y: to.y + size * 0.45,
+      vy: 0.6 + Math.random() * 1.2,
+      r: 2 + Math.random() * 3,
+      life: 120 + Math.random() * 220,
+    });
+  }
+}
+
+function stroke(key, p) {
+  const size = +brushInput.value * dpr;
+  const prev = lastPoint[key];
+  wipe(prev || p, p, size);
+  lastPoint[key] = p;
+}
+
+function updateDrips() {
+  maskCtx.save();
+  maskCtx.fillStyle = 'rgba(255,255,255,0.9)';
+  drips = drips.filter(d => {
+    d.y += d.vy * dpr;
+    d.vy *= 0.995;
+    d.life--;
+    maskCtx.beginPath();
+    maskCtx.arc(d.x, d.y, d.r * dpr, 0, Math.PI * 2);
+    maskCtx.fill();
+    return d.life > 0 && d.y < H && d.vy > 0.05;
+  });
+  maskCtx.restore();
+}
+
+function refogStep() {
+  const speed = +refogInput.value;
+  if (!speed) return;
+  maskCtx.save();
+  maskCtx.globalCompositeOperation = 'destination-out';
+  maskCtx.fillStyle = `rgba(0,0,0,${speed * 0.0012})`;
+  maskCtx.fillRect(0, 0, W, H);
+  maskCtx.restore();
+}
+
+function refogAll() {
+  maskCtx.clearRect(0, 0, W, H);
+  drips = [];
+}
+
+// Mouse / touch
+const toCanvas = e => ({ x: e.clientX * dpr, y: e.clientY * dpr });
+let down = false;
+screen.addEventListener('pointerdown', e => { down = true; lastPoint.mouse = null; stroke('mouse', toCanvas(e)); });
+addEventListener('pointermove', e => { if (down) stroke('mouse', toCanvas(e)); });
+addEventListener('pointerup', () => { down = false; lastPoint.mouse = null; });
+
+addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'R') refogAll();
+  if (e.key === 'h' || e.key === 'H') toggleHud();
+});
+
+// ---- Menu buttons ----
+const hud = document.getElementById('hud');
+function toggleHud() {
+  hud.classList.toggle('collapsed');
+  document.getElementById('toggleHud').textContent = hud.classList.contains('collapsed') ? '🙈' : '👀';
+}
+document.getElementById('toggleHud').addEventListener('click', toggleHud);
+document.getElementById('refogBtn').addEventListener('click', refogAll);
+document.getElementById('snapBtn').addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.download = `fog-mirror-${Date.now()}.png`;
+  a.href = screen.toDataURL('image/png');
+  a.click();
+});
+
+// Bounce the status pill whenever its text changes
+const statusPill = document.getElementById('handStatus');
+let lastStatus = '';
+new MutationObserver(() => {
+  const text = statusPill.textContent;
+  if (text === lastStatus) return;
+  lastStatus = text;
+  statusPill.classList.toggle('on', /wiping|show me/i.test(text));
+  statusPill.classList.remove('bounce');
+  void statusPill.offsetWidth; // restart the animation
+  statusPill.classList.add('bounce');
+}).observe(statusPill, { childList: true, characterData: true, subtree: true });
+
+// ---- Hand tracking (MediaPipe) ----
+let hands = null;
+async function loadHands() {
+  try {
+    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const fileset = await vision.FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+    );
+    const options = delegate => ({
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate,
+      },
+      runningMode: 'VIDEO',
+      numHands: 2,
+      // Lower than the 0.5 defaults so hands aren't lost in dim light or fast motion
+      minHandDetectionConfidence: 0.3,
+      minHandPresenceConfidence: 0.3,
+      minTrackingConfidence: 0.3,
+    });
+    try {
+      hands = await vision.HandLandmarker.createFromOptions(fileset, options('GPU'));
+    } catch {
+      hands = await vision.HandLandmarker.createFromOptions(fileset, options('CPU'));
+    }
+    setStatus('👋 Show me your hand!');
+  } catch (err) {
+    console.warn(err);
+    setStatus('🖱️ No hand tracking, use the mouse');
+  }
+}
+
+// Landmark (0..1 in camera space) -> mirrored canvas pixels
+function landmarkToCanvas(lm) {
+  const r = coverRect();
+  return { x: W - (r.x + lm.x * r.w), y: r.y + lm.y * r.h };
+}
+
+// Landmarks that wipe: wrist, palm knuckles and all five fingertips
+const WIPE_POINTS = [0, 1, 5, 9, 13, 17, 4, 8, 12, 16, 20];
+const PALM = [0, 1, 5, 9, 13, 17];
+const GRACE_FRAMES = 8;      // keep strokes connected through brief tracking dropouts
+let handPrev = {};           // key -> { points, missed }
+let handMarkers = [];        // tracked points to draw as a cursor
+
+let lastVideoTime = -1;
+function trackHands() {
+  if (!hands || video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  const res = hands.detectForVideo(video, performance.now());
+  const found = res.landmarks || [];
+  const mode = document.getElementById('wipeMode').value;
+  const size = +brushInput.value * dpr;
+  const seen = new Set();
+  handMarkers = [];
+
+  found.forEach((lm, i) => {
+    // Key by handedness so two hands don't swap and draw lines between each other
+    const key = res.handedness?.[i]?.[0]?.categoryName || `hand${i}`;
+    seen.add(key);
+    const ids = mode === 'finger' ? [8] : WIPE_POINTS;
+    const points = ids.map(id => landmarkToCanvas(lm[id]));
+    const prev = handPrev[key];
+
+    if (mode === 'palm') {
+      const poly = PALM.map(id => landmarkToCanvas(lm[id]));
+      maskCtx.save();
+      maskCtx.fillStyle = 'rgba(255,255,255,0.95)';
+      maskCtx.shadowColor = '#fff';
+      maskCtx.shadowBlur = size * 0.3;
+      maskCtx.beginPath();
+      poly.forEach((p, j) => (j ? maskCtx.lineTo(p.x, p.y) : maskCtx.moveTo(p.x, p.y)));
+      maskCtx.closePath();
+      maskCtx.fill();
+      maskCtx.restore();
+    }
+
+    const pointSize = mode === 'finger' ? size : size * 0.55;
+    points.forEach((p, j) => {
+      let from = prev?.points[j] || p;
+      // Don't connect across big jumps (tracking glitch or a hand re-entering)
+      if (Math.hypot(from.x - p.x, from.y - p.y) > W * 0.25) from = p;
+      wipe(from, p, pointSize);
+    });
+
+    handPrev[key] = { points, missed: 0 };
+    handMarkers.push(...points);
+  });
+
+  for (const key of Object.keys(handPrev)) {
+    if (seen.has(key)) continue;
+    if (++handPrev[key].missed > GRACE_FRAMES) delete handPrev[key];
+  }
+
+  if (found.length) {
+    lastHandSeen = performance.now();
+    setStatus('✋ Wiping!');
+  } else if (performance.now() - lastHandSeen > LOST_AFTER_MS) {
+    setStatus('👀 Where did your hand go?');
+  }
+}
+
+function drawHandMarkers() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(159, 227, 255, 0.55)';
+  for (const p of handMarkers) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---- Render ----
+function frame() {
+  if (video.readyState >= 2) {
+    trackHands();
+    refogStep();
+    updateDrips();
+
+    // 1. Sharp reflection
+    drawMirrored(ctx, video, W, H);
+
+    // 2. Frosted layer: blurred, brightened, slightly blue-white
+    tinyCtx.drawImage(video, 0, 0, tiny.width, tiny.height);
+    fogCtx.globalCompositeOperation = 'source-over';
+    fogCtx.filter = `blur(${16 * dpr}px)`;
+    fogCtx.imageSmoothingQuality = 'high';
+    fogCtx.save();
+    fogCtx.translate(W, 0);
+    fogCtx.scale(-1, 1);
+    const r = coverRect();
+    fogCtx.drawImage(tiny, r.x, r.y, r.w, r.h);
+    fogCtx.restore();
+    fogCtx.filter = 'none';
+    fogCtx.fillStyle = 'rgba(225, 235, 240, 0.55)';
+    fogCtx.fillRect(0, 0, W, H);
+
+    // 3. Punch the wiped areas out of the fog
+    fogCtx.globalCompositeOperation = 'destination-out';
+    fogCtx.drawImage(mask, 0, 0);
+
+    ctx.drawImage(fog, 0, 0);
+    drawHandMarkers();
+  }
+  requestAnimationFrame(frame);
+}
+
+document.getElementById('go').addEventListener('click', async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    document.getElementById('start').remove();
+    requestAnimationFrame(frame);
+    loadHands();
+  } catch (err) {
+    document.querySelector('#start p').textContent = 'Camera blocked: ' + err.message;
+  }
+});
+</script>
+</body>
+</html>
