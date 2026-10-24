@@ -1,62 +1,21 @@
 # Random ideas
 
-A home for small, fun experiments. Each idea lives in its own folder.
+A collection of small, fun experiments. Each idea lives in its own folder with its own README and live demo.
+
+## Ideas
 
 | Idea | What it is | Live |
 | --- | --- | --- |
-| [Fog Mirror](fog-mirror/) | Your webcam as a steamy mirror you wipe clean with your hand | [Try it](https://fog-mirror-fluffycrunch.netlify.app) |
+| [🌫️ Fog Mirror](fog-mirror/) | Your webcam as a steamy mirror you wipe clean with your hand | [Try it](https://fog-mirror-fluffycrunch.netlify.app) |
 
----
+## Adding a new idea
 
-## 🌫️ Fog Mirror
+1. Create a folder for it, e.g. `my-new-idea/`.
+2. Put the code and a `README.md` describing it inside that folder.
+3. Deploy it to Netlify from the repo root:
 
-**Live:** https://fog-mirror-fluffycrunch.netlify.app
+   ```bash
+   netlify deploy --prod --dir my-new-idea --site-name my-new-idea-fluffycrunch
+   ```
 
-Your camera turns into a fogged-up bathroom mirror. Wave your hand in front of the camera and the fog wipes away wherever it goes, then slowly creeps back. Water drips run down from the edges of your wipes.
-
-### How to use
-
-1. Open the live link (Chrome works best) and click **Breathe on it!**
-2. Allow camera access.
-3. Wave your hand at the camera to wipe the fog, or drag with your mouse or finger.
-
-### Controls
-
-| Control | What it does |
-| --- | --- |
-| **Wipe with** | Whole hand, all fingers, or just one finger |
-| **Brush size** | How wide each wipe is |
-| **Fog comeback** | How quickly the fog returns (0 = never) |
-| **💨 Fog it!** / <kbd>R</kbd> | Fog the whole mirror again |
-| **📸 Snap!** | Save a picture of the mirror |
-| **👀** / <kbd>H</kbd> | Fold the menu away |
-
-### Tips
-
-- Good lighting and your whole hand in view make tracking much more reliable.
-- Sit about an arm's length from the camera.
-- Everything runs in your browser; no video ever leaves your device.
-
-### How it works
-
-- The camera feed is drawn mirrored onto a canvas, with a blurred, brightened copy on top as the fog.
-- [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) finds your hands each frame. The palm and fingertips paint into a mask that cuts holes in the fog.
-- The mask fades a little every frame, so the fog comes back on its own.
-
-### Run it locally
-
-The camera only works over `https` or `localhost`, so serve the folder rather than opening the file directly:
-
-```bash
-python -m http.server 8000 --directory fog-mirror
-```
-
-Then open http://localhost:8000.
-
-### Deploy
-
-Hosted on Netlify from the `fog-mirror` folder:
-
-```bash
-netlify deploy --prod --dir fog-mirror --site fog-mirror-fluffycrunch
-```
+4. Add a row to the table above with the live link.
