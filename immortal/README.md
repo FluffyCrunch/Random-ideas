@@ -80,6 +80,7 @@ Talk to the old woman and she gives Orans a blade. From then on he fights with a
 - The fighters are full-bodied silhouettes built from tapered limbs on a jointed skeleton, so every animation is generated in code. Each figure is drawn twice: once in light and nudged toward the moon, then in black on top, which leaves a thin rim of moonlight along its edge.
 - The cutscene faces are drawn in code too, in a manga style: screentone shading, expressive eyes with highlights, and mouths that move while a character is talking.
 - The noir look comes from a strict black-and-white palette, parallax layers, rain, film grain and a vignette.
+- The only colour in the game is blood, and it only appears in cutscenes. Orans shows up to each one more beaten than the last (a cut cheek, then a split lip and a bruise, then a head wound and a bandaged nose, then a blood-soaked scarf), and the more he has died, the worse he looks.
 
 ## Run it locally
 
