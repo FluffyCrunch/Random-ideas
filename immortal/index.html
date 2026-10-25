@@ -1,0 +1,1686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>IMmortal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Special+Elite&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas {
+    display: block; position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%); touch-action: none;
+  }
+  /* On-screen buttons, only shown on touch devices */
+  #touch {
+    position: fixed; left: 0; right: 0; bottom: 0; display: none;
+    justify-content: space-between; align-items: flex-end;
+    padding: 0 16px max(16px, env(safe-area-inset-bottom)); pointer-events: none;
+  }
+  body.touch #touch, body.touch #tpause { display: flex; }
+  .pad { display: flex; gap: 10px; pointer-events: auto; }
+  .pad.right { flex-wrap: wrap; justify-content: flex-end; max-width: 220px; }
+  .tbtn {
+    width: 62px; height: 62px; border-radius: 50%; border: 2px solid rgba(242,242,242,.55);
+    background: rgba(242,242,242,.06); color: #f2f2f2; font: 700 14px 'Cinzel', serif;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .tbtn.on { background: rgba(242,242,242,.35); }
+  #tpause {
+    position: fixed; top: 12px; right: 12px; display: none; width: 44px; height: 44px;
+    align-items: center; justify-content: center;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="touch">
+  <div class="pad">
+    <button class="tbtn" data-a="left">◀</button>
+    <button class="tbtn" data-a="right">▶</button>
+  </div>
+  <div class="pad right">
+    <button class="tbtn" data-a="dodge">ROLL</button>
+    <button class="tbtn" data-a="jump">▲</button>
+    <button class="tbtn" data-a="heavy">HVY</button>
+    <button class="tbtn" data-a="light">HIT</button>
+  </div>
+</div>
+<button class="tbtn" id="tpause" data-a="pause">II</button>
+
+<script>
+// =====================================================================
+//  IMmortal: a love story with diminishing returns
+// =====================================================================
+
+const VW = 960, VH = 540;          // logical resolution, scaled to fit the window
+const GROUND = 440;                // feet line
+const GRAV = 2300;
+const LEVEL_END = 7200;
+const MANTIS_X = 7020;
+const BASE_HP = 100, BASE_DMG = 10;
+const DECAY = 0.85;                // each death keeps 85% of max HP and damage
+const MAX_ATTACKERS = 2;           // melee enemies allowed to swing at once
+
+const WHITE = '#f2f2f2';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let scale = 1, dpr = 1;
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  scale = Math.min(innerWidth / VW, innerHeight / VH);
+  canvas.style.width = VW * scale + 'px';
+  canvas.style.height = VH * scale + 'px';
+  canvas.width = Math.round(VW * scale * dpr);
+  canvas.height = Math.round(VH * scale * dpr);
+}
+addEventListener('resize', resize);
+resize();
+// Canvas text doesn't trigger web-font downloads, so ask for them up front
+['900 40px Cinzel', '700 16px Cinzel', '16px "Special Elite"'].forEach(f => document.fonts.load(f).catch(() => {}));
+
+// ---------- Helpers ----------
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const ease = t => t * t * (3 - 2 * t);
+function seeded(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+function toRoman(n) {
+  const map = [[10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+  if (n >= 40) return String(n);
+  let out = '';
+  for (const [v, s] of map) while (n >= v) { out += s; n -= v; }
+  return out;
+}
+function fmtTime(s) { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
+
+// ---------- Input (buffered so presses during hit-stop aren't lost) ----------
+const keys = {};
+const pressed = {};
+const KEYMAP = {
+  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
+  ArrowUp: 'jump', KeyW: 'jump', Space: 'jump',
+  KeyJ: 'light', KeyZ: 'light', KeyK: 'heavy', KeyX: 'heavy',
+  KeyL: 'dodge', ShiftLeft: 'dodge', ShiftRight: 'dodge', KeyC: 'dodge',
+  Enter: 'confirm', KeyP: 'pause', Escape: 'pause', KeyM: 'mute',
+};
+function press(a) { if (!keys[a]) pressed[a] = game.t; keys[a] = true; }
+function release(a) { keys[a] = false; }
+function consume(a) {
+  if (pressed[a] != null && game.t - pressed[a] < 0.15) { pressed[a] = null; return true; }
+  return false;
+}
+addEventListener('keydown', e => {
+  const a = KEYMAP[e.code];
+  if (!a) return;
+  e.preventDefault();
+  unlockAudio();
+  if (!e.repeat) press(a);
+});
+addEventListener('keyup', e => { const a = KEYMAP[e.code]; if (a) release(a); });
+// A key released while the window was unfocused never sends keyup, so drop everything held
+addEventListener('blur', () => { for (const a in keys) keys[a] = false; });
+canvas.addEventListener('pointerdown', e => {
+  unlockAudio();
+  if (e.pointerType === 'touch') document.body.classList.add('touch');
+  pressed.confirm = game.t;
+});
+if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
+document.querySelectorAll('.tbtn').forEach(btn => {
+  const a = btn.dataset.a;
+  const down = e => { e.preventDefault(); unlockAudio(); press(a); if (a !== 'pause') pressed.confirm = game.t; btn.classList.add('on'); };
+  const up = () => { release(a); btn.classList.remove('on'); };
+  btn.addEventListener('pointerdown', down);
+  btn.addEventListener('pointerup', up);
+  btn.addEventListener('pointerleave', up);
+  btn.addEventListener('pointercancel', up);
+});
+
+// ---------- Sound (all synthesised, no files) ----------
+let actx = null, muted = false, noiseBuf = null, rainGain = null;
+function unlockAudio() {
+  if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
+  try { actx = new AudioContext(); } catch { return; }
+  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  // Soft rain ambience
+  const src = actx.createBufferSource(), f = actx.createBiquadFilter();
+  rainGain = actx.createGain();
+  src.buffer = noiseBuf; src.loop = true;
+  f.type = 'lowpass'; f.frequency.value = 900;
+  rainGain.gain.value = muted ? 0 : 0.035;
+  src.connect(f).connect(rainGain).connect(actx.destination);
+  src.start();
+}
+function tone(freq, dur, type = 'sine', vol = 0.1, slide = 1) {
+  if (!actx || muted) return;
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20, freq * slide), t + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(actx.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function noise(dur, vol, freq, type = 'lowpass') {
+  if (!actx || muted) return;
+  const t = actx.currentTime, s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+  s.buffer = noiseBuf; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f).connect(g).connect(actx.destination);
+  s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.02);
+}
+const sfx = {
+  swing: heavy => noise(heavy ? 0.18 : 0.09, heavy ? 0.12 : 0.07, heavy ? 900 : 2400, 'highpass'),
+  hit: heavy => { noise(0.12, heavy ? 0.4 : 0.25, 500); tone(heavy ? 70 : 110, 0.15, 'sine', 0.25, 0.4); },
+  hurt: () => { tone(160, 0.25, 'sawtooth', 0.1, 0.4); noise(0.1, 0.2, 400); },
+  death: () => { tone(220, 1.8, 'sine', 0.2, 0.15); tone(110, 1.8, 'triangle', 0.14, 0.25); },
+  rise: () => { tone(110, 1.0, 'sine', 0.18, 4); tone(165, 1.0, 'triangle', 0.07, 4); },
+  jump: () => tone(300, 0.08, 'triangle', 0.05, 1.6),
+  dodge: () => noise(0.2, 0.08, 1200, 'bandpass'),
+  throw: () => noise(0.1, 0.07, 3000, 'highpass'),
+  parry: () => { tone(1200, 0.15, 'square', 0.05, 0.9); tone(1800, 0.12, 'triangle', 0.05, 0.9); },
+  tick: () => tone(700 + Math.random() * 300, 0.02, 'square', 0.012),
+  stab: () => { noise(0.5, 0.45, 700); tone(55, 1.4, 'sine', 0.3, 0.3); },
+  start: () => tone(220, 0.8, 'sine', 0.12, 2),
+};
+function toggleMute() {
+  muted = !muted;
+  if (rainGain) rainGain.gain.value = muted ? 0 : 0.035;
+}
+
+// =====================================================================
+//  World data
+// =====================================================================
+const ZONES = [
+  { x: 0, name: 'I. THE OUTSKIRTS', sub: 'where the trail begins' },
+  { x: 1800, name: 'II. THE MARKET', sub: 'everyone has a price' },
+  { x: 3600, name: 'III. THE BRIDGE', sub: 'no way back' },
+  { x: 5400, name: 'IV. THE TOWER', sub: 'she is waiting' },
+];
+
+// Each encounter locks the screen until every wave is beaten
+const ENCOUNTERS = [
+  { x: 650, waves: [['grunt', 'grunt']] },
+  { x: 1350, waves: [['grunt', 'grunt', 'grunt']] },
+  { x: 2150, waves: [['grunt', 'thrower'], ['grunt', 'grunt']] },
+  { x: 2850, waves: [['brute', 'grunt']] },
+  { x: 3350, waves: [['thrower', 'grunt', 'grunt'], ['thrower', 'grunt']] },
+  { x: 3950, waves: [['brute', 'grunt', 'grunt']] },
+  { x: 4650, waves: [['brute', 'thrower'], ['brute', 'grunt']] },
+  { x: 5150, waves: [['grunt', 'grunt', 'thrower', 'thrower']] },
+  { x: 5850, waves: [['brute', 'grunt', 'thrower'], ['grunt', 'grunt', 'thrower']] },
+  { x: 6600, waves: [['warden']] },
+];
+
+const TYPES = {
+  grunt:   { hp: 40,  dmg: 8,  speed: 125, range: 58, windup: 0.42, recover: 0.5, cd: [1.0, 1.8], w: 34, h: 96,  kbRes: 1,    armor: false, look: 'grunt' },
+  brute:   { hp: 130, dmg: 18, speed: 75,  range: 80, windup: 0.75, recover: 0.8, cd: [1.6, 2.4], w: 54, h: 124, kbRes: 0.4,  armor: true,  look: 'brute' },
+  thrower: { hp: 30,  dmg: 7,  speed: 140, range: 0,  windup: 0.45, recover: 0.4, cd: [1.6, 2.4], w: 30, h: 92,  kbRes: 1,    armor: false, look: 'thrower', ranged: true },
+  warden:  { hp: 420, dmg: 22, speed: 135, range: 95, windup: 0.7,  recover: 0.7, cd: [1.0, 1.6], w: 64, h: 150, kbRes: 0.25, armor: true,  look: 'warden', boss: true },
+};
+
+// Light combo: punch, punch, kick. Heavy: overhead smash that staggers anything.
+const ATK = {
+  light: [
+    { dur: 0.26, active: [0.07, 0.15], reach: 74, mult: 1.0, kb: 170 },
+    { dur: 0.26, active: [0.07, 0.15], reach: 74, mult: 1.1, kb: 170 },
+    { dur: 0.4,  active: [0.12, 0.22], reach: 88, mult: 1.7, kb: 420, stagger: true },
+  ],
+  heavy: { dur: 0.62, active: [0.32, 0.42], reach: 98, mult: 2.4, kb: 540, stagger: true },
+};
+
+const TAUNTS = {
+  any: [
+    'Turn back, Oranus.', "She's not who you think.", 'Who do you think pays us?',
+    'Go home, lover boy.', "She said you'd come.", 'Nothing personal. Strictly business.',
+    "You really don't get it, do you?",
+  ],
+  after: [
+    'Back again? You look smaller.', 'Weren\'t you taller last time?', 'Every time you rise, you shrink.',
+    "Keep dying. She'd like that.", "Immortal? You're barely breathing.", 'Same guy. Less of him.',
+  ],
+};
+
+const DEATH_LINES = [
+  'Immortality has side effects.', 'You get back up. Less of you does.',
+  'Love hurts. Specifically, your max HP.', 'Respawning with 15% less everything.',
+  "She's worth it. Probably.", "The body heals. The numbers don't.",
+  'Death is temporary. Weakness is forever.', "Your enemies remember. Your muscles don't.",
+];
+
+const INTRO = [
+  'Oranus cannot die.',
+  'When he falls, he rises again.',
+  'But every time he rises, a little less of him comes back.',
+  'Tonight, they took Mantis.',
+  'There are no checkpoints. Only the way forward.',
+];
+
+// =====================================================================
+//  Game state
+// =====================================================================
+const game = {
+  state: 'title', t: 0, deaths: 0, kills: 0, time: 0,
+  hitstop: 0, shake: 0, flash: 0, invert: 0, slowmo: 0, dieT: 0,
+  zoneIdx: -1, banner: null, goArrow: 0, arena: null, wave: 0, encounters: [],
+  intro: null, dead: null, cut: null, final: null,
+};
+let player, enemies, projectiles, particles, rings, texts, splats, camX = 0, mantis, bossRef;
+
+function makePlayer() {
+  return {
+    x: 120, y: GROUND, vx: 0, vy: 0, face: 1, onGround: true,
+    maxHp: BASE_HP, hp: BASE_HP, dmg: BASE_DMG,
+    state: 'idle', t: 0, combo: 0, comboQueued: false, hitSet: new Set(), inv: 0, dodgeCd: 0,
+  };
+}
+function makeEnemy(type, x) {
+  const T = TYPES[type];
+  return {
+    type, T, x, y: GROUND, vx: 0, vy: 0, kbv: 0, face: -1, hp: T.hp,
+    state: 'approach', t: 0, cd: rand(0.4, 1.2), flash: 0, dead: false, deadT: 0,
+    kind: null, hitDone: false, stagger: 0, entering: true, say: null, seed: Math.random() * 10,
+  };
+}
+function resetGame() {
+  player = makePlayer();
+  enemies = []; projectiles = []; particles = []; rings = []; texts = []; splats = [];
+  camX = 0; bossRef = null;
+  mantis = { state: 'bound', t: 0, x: MANTIS_X, say: null, lunge: 0 };
+  Object.assign(game, {
+    deaths: 0, kills: 0, time: 0, hitstop: 0, slowmo: 0, dieT: 0, zoneIdx: -1, banner: null,
+    goArrow: 0, arena: null, wave: 0, cut: null, final: null,
+    encounters: ENCOUNTERS.map(e => ({ ...e, done: false })),
+  });
+}
+resetGame();
+
+// =====================================================================
+//  Effects
+// =====================================================================
+function burst(x, y, n, speed = 420) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = rand(80, speed);
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 80, life: rand(0.25, 0.55), max: 0.55, len: rand(4, 10) });
+  }
+}
+function ring(x, y) { rings.push({ x, y, t: 0 }); }
+function popText(x, y, text, big = false) { texts.push({ x, y, text, t: 0, big }); }
+function say(who, text, dur = 2.6) { if (who) who.say = { text, t: dur }; }
+function showBanner(title, sub) { game.banner = { title, sub, t: 0 }; }
+function makeSplat(x) {
+  return { x, blobs: Array.from({ length: 6 }, () => ({ dx: rand(-34, 34), rx: rand(8, 28), ry: rand(2, 5) })) };
+}
+
+function updateEffects(dt) {
+  for (const p of particles) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 900 * dt; p.vx *= Math.exp(-3 * dt); }
+  particles = particles.filter(p => p.life > 0);
+  for (const r of rings) r.t += dt;
+  rings = rings.filter(r => r.t < 0.7);
+  for (const t of texts) t.t += dt;
+  texts = texts.filter(t => t.t < 0.9);
+  if (game.banner && (game.banner.t += dt) > 3.2) game.banner = null;
+  game.goArrow = Math.max(0, game.goArrow - dt);
+  for (const e of [...enemies, mantis]) if (e.say && (e.say.t -= dt) <= 0) e.say = null;
+}
+
+// =====================================================================
+//  Player
+// =====================================================================
+function playerBounds() {
+  if (game.arena) return [game.arena.left + 20, Math.min(game.arena.left + VW - 20, MANTIS_X - 80)];
+  return [20, MANTIS_X - 80];
+}
+
+function physics(o, dt, minX, maxX) {
+  o.vy += GRAV * dt;
+  o.y += o.vy * dt;
+  if (o.y >= GROUND) { o.y = GROUND; o.vy = 0; o.onGround = true; } else o.onGround = false;
+  o.x = clamp(o.x + o.vx * dt, minX, maxX);
+}
+
+function startAttack(kind, chained = false) {
+  const p = player;
+  p.state = kind; p.t = 0; p.hitSet = new Set(); p.comboQueued = false;
+  if (!chained) p.combo = 0;
+  if (keys.left) p.face = -1;
+  if (keys.right) p.face = 1;
+  p.vx = p.face * (kind === 'heavy' ? 60 : 160);
+  sfx.swing(kind === 'heavy');
+}
+
+function updatePlayer(dt) {
+  const p = player;
+  const [minX, maxX] = playerBounds();
+  p.inv = Math.max(0, p.inv - dt);
+  p.dodgeCd -= dt;
+
+  if (p.state === 'dying' || p.state === 'fallen') {
+    p.t += dt;
+    p.vx *= Math.exp(-6 * dt);
+    physics(p, dt, minX, maxX);
+    return;
+  }
+
+  const move = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+
+  if (p.state === 'light' || p.state === 'heavy') {
+    p.t += dt;
+    const a = p.state === 'heavy' ? ATK.heavy : ATK.light[p.combo];
+    if (p.t >= a.active[0] && p.t <= a.active[1]) playerHit(a);
+    if (p.state === 'light' && p.combo < 2 && consume('light')) p.comboQueued = true;
+    p.vx *= Math.exp(-10 * dt);
+    if (p.t >= a.dur) {
+      if (p.comboQueued) { p.combo++; startAttack('light', true); }
+      else { p.state = 'idle'; p.combo = 0; }
+    }
+  } else if (p.state === 'dodge') {
+    p.t += dt;
+    p.vx = p.face * 560 * (1 - p.t / 0.36);
+    if (p.t >= 0.36) p.state = 'idle';
+  } else if (p.state === 'hurt') {
+    p.t += dt;
+    p.vx *= Math.exp(-8 * dt);
+    if (p.t >= 0.28) p.state = 'idle';
+  } else {
+    p.vx = move * 280;
+    if (move) p.face = move;
+    if (consume('jump') && p.onGround) { p.vy = -820; p.onGround = false; sfx.jump(); }
+    if (consume('light')) startAttack('light');
+    else if (consume('heavy')) startAttack('heavy');
+    else if (p.dodgeCd <= 0 && consume('dodge')) {
+      p.state = 'dodge'; p.t = 0; p.inv = Math.max(p.inv, 0.36); p.dodgeCd = 0.65;
+      if (move) p.face = move;
+      sfx.dodge();
+    }
+  }
+  physics(p, dt, minX, maxX);
+}
+
+function playerHit(a) {
+  const p = player;
+  const x0 = p.face > 0 ? p.x + 6 : p.x - 6 - a.reach, x1 = x0 + a.reach;
+  const y0 = p.y - 105, y1 = p.y - 5;
+  for (const e of enemies) {
+    if (e.dead || p.hitSet.has(e)) continue;
+    const ex0 = e.x - e.T.w / 2, ex1 = e.x + e.T.w / 2, ey0 = e.y - e.T.h;
+    if (x1 < ex0 || x0 > ex1 || y1 < ey0 || y0 > e.y) continue;
+    p.hitSet.add(e);
+    damageEnemy(e, p.dmg * a.mult, a);
+  }
+  // Knives can be knocked out of the air
+  for (const k of projectiles) {
+    if (!k.dead && k.x > x0 - 10 && k.x < x1 + 10 && k.y > y0 && k.y < y1) {
+      k.dead = true;
+      popText(k.x, k.y - 20, 'PARRY');
+      sfx.parry();
+      burst(k.x, k.y, 8);
+    }
+  }
+}
+
+function damageEnemy(e, dmg, a) {
+  e.hp -= dmg;
+  e.flash = 0.12;
+  game.hitstop = a.stagger ? 0.09 : 0.05;
+  game.shake = Math.max(game.shake, a.stagger ? 9 : 4);
+  const dir = Math.sign(e.x - player.x) || player.face;
+  e.kbv = dir * a.kb * e.T.kbRes;
+  popText(e.x, e.y - e.T.h - 12, dmg < 10 ? dmg.toFixed(1) : String(Math.round(dmg)));
+  burst(e.x - dir * 10, e.y - e.T.h * 0.6, a.stagger ? 14 : 8);
+  sfx.hit(a.stagger);
+  if (e.hp <= 0) { killEnemy(e, dir); return; }
+  if (!e.T.armor || a.stagger) {
+    e.state = 'hurt'; e.t = 0;
+    e.stagger = e.T.boss ? 0.25 : a.stagger ? 0.45 : 0.28;
+  }
+}
+
+function killEnemy(e, dir) {
+  e.dead = true; e.deadT = 0; e.say = null;
+  e.kbv = dir * 380; e.vy = -320;
+  game.kills++;
+  splats.push(makeSplat(e.x + dir * 30));
+  if (e === bossRef) {
+    bossRef = null;
+    game.slowmo = 1.2;
+    game.shake = 16;
+    showBanner('THE WARDEN FALLS', 'the tower is open');
+  }
+}
+
+function hurtPlayer(dmg, dir) {
+  const p = player;
+  if (p.inv > 0 || p.state === 'dying' || game.state !== 'play') return;
+  p.hp -= dmg;
+  p.state = 'hurt'; p.t = 0; p.vx = dir * 300; p.inv = 0.7;
+  game.shake = Math.max(game.shake, 8);
+  game.flash = 0.25;
+  sfx.hurt();
+  popText(p.x, p.y - 118, '-' + Math.round(dmg), true);
+  burst(p.x, p.y - 60, 10);
+  if (p.hp <= 0) { p.hp = 0; die(); }
+}
+
+function die() {
+  player.state = 'dying'; player.t = 0;
+  game.invert = 0.18;
+  game.slowmo = 1.4;
+  game.dieT = 0;
+  projectiles = [];
+  sfx.death();
+}
+
+function enterDeathScreen() {
+  const p = player;
+  game.state = 'dead';
+  game.dead = {
+    t: 0, n: game.deaths + 1, line: pick(DEATH_LINES),
+    from: { hp: p.maxHp, dmg: p.dmg },
+    to: { hp: Math.max(5, p.maxHp * DECAY), dmg: Math.max(1, p.dmg * DECAY) },
+  };
+}
+
+function rise() {
+  const p = player, d = game.dead;
+  game.deaths++;
+  p.maxHp = d.to.hp; p.dmg = d.to.dmg; p.hp = p.maxHp;
+  p.state = 'idle'; p.t = 0; p.inv = 2; p.vx = 0;
+  game.state = 'play';
+  sfx.rise();
+  ring(p.x, p.y - 50);
+  popText(p.x, p.y - 125, 'RISE', true);
+  // Rising knocks nearby enemies away so you aren't instantly killed again
+  for (const e of enemies) {
+    if (e.dead) continue;
+    const dx = e.x - p.x;
+    if (Math.abs(dx) < 320) { e.kbv = (Math.sign(dx) || 1) * 520; e.state = 'hurt'; e.t = 0; e.stagger = 0.9; }
+  }
+}
+
+// =====================================================================
+//  Enemies
+// =====================================================================
+function attackers() {
+  return enemies.filter(e => !e.dead && !e.T.boss && !e.T.ranged && (e.state === 'windup' || e.state === 'attack')).length;
+}
+
+function throwKnife(e) {
+  projectiles.push({ x: e.x + e.face * 20, y: e.y - 64, vx: e.face * 430, dmg: e.T.dmg, life: 3, rot: 0 });
+  sfx.throw();
+}
+
+function updateEnemy(e, dt) {
+  e.flash = Math.max(0, e.flash - dt);
+  if (e.dead) {
+    e.deadT += dt;
+    e.vy += GRAV * dt;
+    e.y = Math.min(GROUND, e.y + e.vy * dt);
+    e.kbv *= Math.exp(-5 * dt);
+    e.x += e.kbv * dt;
+    return;
+  }
+  const p = player, T = e.T;
+  const dx = p.x - e.x, dist = Math.abs(dx), dir = Math.sign(dx) || 1;
+  const playerDown = p.state === 'dying' || game.state !== 'play';
+  e.cd -= dt;
+  e.t += dt;
+  let vx = 0;
+
+  switch (e.state) {
+    case 'approach':
+      e.face = dir;
+      if (playerDown) break;
+      if (e.entering) { vx = dir * T.speed; break; }
+      if (T.ranged) {
+        if (dist < 230) vx = -dir * T.speed;
+        else if (dist > 380) vx = dir * T.speed;
+        if (e.cd <= 0 && dist < 560) { e.state = 'windup'; e.t = 0; e.kind = 'throw'; }
+      } else {
+        if (T.boss && e.cd <= 0 && dist > 220 && dist < 520) { e.state = 'windup'; e.t = 0; e.kind = 'dash'; break; }
+        if (dist > T.range) vx = dir * T.speed;
+        if (dist <= T.range + 12 && e.cd <= 0 && (T.boss || attackers() < MAX_ATTACKERS)) {
+          e.state = 'windup'; e.t = 0; e.kind = 'melee';
+        }
+      }
+      break;
+    case 'windup':
+      if (e.t >= (e.kind === 'dash' ? 0.55 : T.windup)) {
+        e.state = 'attack'; e.t = 0; e.hitDone = false;
+        if (e.kind === 'throw') throwKnife(e);
+        else sfx.swing(T.boss || e.type === 'brute');
+      }
+      break;
+    case 'attack':
+      if (e.kind === 'dash') {
+        vx = e.face * 640;
+        if (!e.hitDone && Math.abs(p.x - e.x) < 52 && p.y > GROUND - 90) { e.hitDone = true; hurtPlayer(T.dmg * 0.8, e.face); }
+        if (e.t >= 0.45) { e.state = 'recover'; e.t = 0; }
+      } else if (e.kind === 'melee') {
+        if (!e.hitDone) {
+          e.hitDone = true;
+          const inFront = Math.sign(p.x - e.x) === e.face || dist < 20;
+          if (inFront && dist <= T.range + 20 && p.y > GROUND - 70) hurtPlayer(T.dmg, e.face);
+          if (e.type !== 'grunt') game.shake = Math.max(game.shake, 6);
+        }
+        if (e.t >= 0.18) { e.state = 'recover'; e.t = 0; }
+      } else if (e.t >= 0.2) { e.state = 'recover'; e.t = 0; }
+      break;
+    case 'recover':
+      if (e.t >= T.recover) { e.state = 'approach'; e.t = 0; e.cd = rand(...T.cd); }
+      break;
+    case 'hurt':
+      if (e.t >= e.stagger) { e.state = 'approach'; e.t = 0; e.cd = Math.max(e.cd, 0.3); }
+      break;
+  }
+
+  e.kbv *= Math.exp(-7 * dt);
+  e.vx = vx;
+  e.x += (vx + e.kbv) * dt;
+  const a = game.arena;
+  if (a) {
+    if (e.entering && e.x > a.left + 30 && e.x < a.left + VW - 30) e.entering = false;
+    if (!e.entering) e.x = clamp(e.x, a.left + 20, a.left + VW - 20);
+  }
+}
+
+// Stop enemies from stacking on top of each other
+function separate() {
+  const alive = enemies.filter(e => !e.dead);
+  for (let i = 0; i < alive.length; i++) {
+    for (let j = i + 1; j < alive.length; j++) {
+      const a = alive[i], b = alive[j];
+      const min = (a.T.w + b.T.w) * 0.45, d = b.x - a.x;
+      if (Math.abs(d) < min) {
+        const push = (min - Math.abs(d)) / 2 * (d < 0 ? -1 : 1);
+        a.x -= push; b.x += push;
+      }
+    }
+  }
+}
+
+function updateProjectiles(dt) {
+  const p = player;
+  for (const k of projectiles) {
+    k.x += k.vx * dt; k.life -= dt; k.rot += dt * 22;
+    if (!k.dead && Math.abs(k.x - p.x) < 18 && k.y > p.y - 95 && k.y < p.y - 5 && p.inv <= 0 && p.state !== 'dying') {
+      k.dead = true;
+      hurtPlayer(k.dmg, Math.sign(k.vx));
+    }
+  }
+  projectiles = projectiles.filter(k => !k.dead && k.life > 0);
+}
+
+// =====================================================================
+//  Encounters, zones, camera
+// =====================================================================
+function startEncounter(enc) {
+  game.arena = { enc, left: clamp(enc.x - 380, 0, LEVEL_END - VW) };
+  game.wave = 0;
+  spawnWave(enc.waves[0]);
+}
+
+function spawnWave(list) {
+  const a = game.arena;
+  const isBoss = list.includes('warden');
+  let side = isBoss ? 1 : Math.random() < 0.5 ? -1 : 1;
+  list.forEach((type, i) => {
+    const x = side < 0 ? a.left - 40 - i * 40 : a.left + VW + 40 + i * 40;
+    const e = makeEnemy(type, x);
+    e.face = -side;
+    enemies.push(e);
+    side *= -1;
+  });
+  if (isBoss) {
+    bossRef = enemies.find(e => e.type === 'warden' && !e.dead);
+    say(bossRef, "She said you'd come. She said to make it hurt.", 3.5);
+    say(mantis, 'Oranus! Save me!', 3);
+    showBanner('THE WARDEN', 'keeper of the tower');
+  } else if (Math.random() < 0.75) {
+    const talker = enemies[enemies.length - 1];
+    const pool = game.deaths > 0 && Math.random() < 0.6 ? TAUNTS.after : TAUNTS.any;
+    say(talker, pick(pool));
+  }
+}
+
+function updateEncounters() {
+  if (!game.arena) {
+    const enc = game.encounters.find(e => !e.done);
+    if (enc && player.x >= enc.x - 120) startEncounter(enc);
+    return;
+  }
+  if (enemies.some(e => !e.dead)) return;
+  const enc = game.arena.enc;
+  if (game.wave < enc.waves.length - 1) {
+    game.wave++;
+    spawnWave(enc.waves[game.wave]);
+  } else {
+    enc.done = true;
+    game.arena = null;
+    game.goArrow = 3;
+  }
+}
+
+function updateZones() {
+  for (let i = ZONES.length - 1; i >= 0; i--) {
+    if (player.x >= ZONES[i].x) {
+      if (i > game.zoneIdx) { game.zoneIdx = i; showBanner(ZONES[i].name, ZONES[i].sub); }
+      break;
+    }
+  }
+}
+
+function updateCamera(dt) {
+  let target;
+  if (game.state === 'cutscene') target = MANTIS_X - VW * 0.62;
+  else if (game.arena) target = game.arena.left;
+  else target = clamp(player.x - VW * 0.38, 0, LEVEL_END - VW);
+  camX = lerp(camX, target, 1 - Math.exp(-dt * 5));
+}
+
+// =====================================================================
+//  Ending
+// =====================================================================
+function endingScript() {
+  const d = game.deaths, p = player;
+  return [
+    { who: 'ORANUS', text: "Mantis! I'm here. It's over." },
+    { who: 'MANTIS', text: '...You came.' },
+    { who: 'MANTIS', text: d === 0 ? 'Not a single death? How disappointing.' : `Of course you came. ${d} ${d === 1 ? 'death' : 'deaths'}, and you still came.` },
+    { who: 'ORANUS', text: "Let's go home." },
+    { who: 'MANTIS', text: 'Home?', do: () => { mantis.state = 'stand'; mantis.t = 0; burst(MANTIS_X, GROUND - 50, 12, 200); } },
+    { who: 'MANTIS', text: 'Oranus... who do you think hired them?' },
+    { who: 'ORANUS', text: '...What?' },
+    { who: 'MANTIS', text: "You can't be killed. Believe me, I tried." },
+    {
+      who: 'MANTIS', text: d === 0
+        ? 'So I sent an army to wear you down. You were supposed to break.'
+        : 'So I let them kill you. Again. And again. And every time, you came back a little weaker.',
+    },
+    {
+      who: 'MANTIS', text: d === 0
+        ? "Doesn't matter. I'll do it myself."
+        : `Look at you. ${Math.ceil(p.maxHp)} HP. ${p.dmg.toFixed(1)} damage. Barely a man.`,
+    },
+    { who: 'MANTIS', text: 'Did you know, darling? The female praying mantis... eats her mate.', do: () => { mantis.state = 'pray'; mantis.t = 0; } },
+    { who: null, text: '', auto: 1.9, do: mantisStrike },
+  ];
+}
+
+function mantisStrike() {
+  mantis.state = 'strike'; mantis.t = 0;
+  player.state = 'fallen'; player.t = 0; player.hp = 0; player.vx = -120;
+  game.invert = 0.22;
+  game.shake = 16;
+  burst(player.x, player.y - 60, 24, 520);
+  sfx.stab();
+}
+
+function startCutscene() {
+  game.state = 'cutscene';
+  game.arena = null;
+  enemies.forEach(e => (e.say = null));
+  projectiles = [];
+  Object.assign(player, { state: 'idle', t: 0, inv: 0, vy: 0 });
+  game.cut = { phase: 'walk', i: 0, t: 0, chars: 0, text: '', lines: endingScript(), bars: 0 };
+}
+
+function startLine() {
+  const c = game.cut, l = c.lines[c.i];
+  c.t = 0; c.chars = 0;
+  c.text = typeof l.text === 'function' ? l.text() : l.text;
+  l.do?.();
+}
+
+function nextLine() {
+  const c = game.cut;
+  c.i++;
+  if (c.i >= c.lines.length) { game.state = 'final'; game.final = { t: 0 }; return; }
+  startLine();
+}
+
+function updateCutscene(dt) {
+  const c = game.cut, p = player;
+  c.bars = Math.min(1, c.bars + dt * 1.5);
+  mantis.t += dt;
+  if (mantis.state === 'strike') mantis.lunge = Math.min(1, mantis.t / 0.12);
+
+  if (c.phase === 'walk') {
+    const dx = MANTIS_X - 115 - p.x;
+    p.vx = Math.abs(dx) > 4 ? Math.sign(dx) * 150 : 0;
+    p.face = p.vx < 0 ? -1 : 1;
+    p.x += p.vx * dt;
+    if (!p.vx) { p.face = 1; c.phase = 'talk'; startLine(); }
+    return;
+  }
+  if (p.state === 'fallen') { p.t += dt; p.vx *= Math.exp(-6 * dt); p.x += p.vx * dt; }
+
+  c.t += dt;
+  const line = c.lines[c.i];
+  const before = Math.floor(c.chars);
+  c.chars = Math.min(c.text.length, c.chars + dt * 40);
+  if (Math.floor(c.chars) > before && before % 2 === 0) sfx.tick();
+  if (line.auto) { if (c.t >= line.auto) nextLine(); return; }
+  if (consume('confirm') || consume('light') || consume('jump')) {
+    if (c.chars < c.text.length) c.chars = c.text.length;
+    else nextLine();
+  }
+}
+
+// =====================================================================
+//  Main update
+// =====================================================================
+function update(dt) {
+  game.t += dt;
+  updateRain(dt);
+  if (consume('mute')) toggleMute();
+
+  switch (game.state) {
+    case 'title':
+      if (consume('confirm') || consume('light') || consume('jump')) {
+        resetGame();
+        game.state = 'intro';
+        game.intro = { i: 0, t: 0, chars: 0, doneT: null };
+        sfx.start();
+      }
+      break;
+    case 'intro': updateIntro(dt); break;
+    case 'play':
+      if (consume('pause')) { game.state = 'paused'; break; }
+      updatePlay(dt);
+      break;
+    case 'paused':
+      if (consume('pause') || consume('confirm')) game.state = 'play';
+      break;
+    case 'dead':
+      game.dead.t += dt;
+      enemies.forEach(e => updateEnemy(e, dt));
+      updateEffects(dt);
+      if (game.dead.t > 1.6 && (consume('confirm') || consume('light') || consume('jump'))) rise();
+      break;
+    case 'cutscene':
+      updateCutscene(dt);
+      enemies.forEach(e => updateEnemy(e, dt));
+      updateEffects(dt);
+      updateCamera(dt);
+      break;
+    case 'final': {
+      const f = game.final;
+      f.t += dt;
+      const go = consume('confirm') || consume('light') || consume('jump');
+      if (go && f.t > 10.4) { resetGame(); game.state = 'title'; }
+      else if (go && f.t > 3) f.t = Math.max(f.t, 9.4);
+      break;
+    }
+  }
+  game.shake *= Math.exp(-dt * 10);
+  game.flash = Math.max(0, game.flash - dt);
+  game.invert = Math.max(0, game.invert - dt);
+}
+
+function updatePlay(dt) {
+  game.time += dt;
+  if (game.hitstop > 0) { game.hitstop -= dt; return; }
+  let sdt = dt;
+  if (game.slowmo > 0) { game.slowmo -= dt; sdt = dt * 0.35; }
+
+  updatePlayer(sdt);
+  enemies.forEach(e => updateEnemy(e, sdt));
+  separate();
+  enemies = enemies.filter(e => !e.dead || e.deadT < 2.6);
+  updateProjectiles(sdt);
+  updateEffects(sdt);
+  updateEncounters();
+  updateZones();
+  updateCamera(dt);
+
+  if (player.state === 'dying' && (game.dieT += dt) > 1.5) enterDeathScreen();
+  if (!game.arena && game.encounters.every(e => e.done) && player.x >= MANTIS_X - 230 && player.state !== 'dying') startCutscene();
+}
+
+function updateIntro(dt) {
+  const s = game.intro;
+  s.t += dt;
+  if (consume('pause')) { beginPlay(); return; }
+  if (s.i < INTRO.length) {
+    const full = INTRO[s.i];
+    const before = Math.floor(s.chars);
+    s.chars = Math.min(full.length, s.chars + dt * 30);
+    if (Math.floor(s.chars) > before && before % 2 === 0) sfx.tick();
+    const done = s.chars >= full.length;
+    if (done && s.doneT == null) s.doneT = s.t;
+    if (consume('confirm') || consume('light') || consume('jump')) {
+      if (!done) s.chars = full.length;
+      else nextIntro();
+    } else if (done && s.t - s.doneT > 2.4) nextIntro();
+  } else if (consume('confirm') || consume('light') || consume('jump')) beginPlay();
+}
+function nextIntro() { Object.assign(game.intro, { i: game.intro.i + 1, t: 0, chars: 0, doneT: null }); }
+function beginPlay() { game.state = 'play'; sfx.start(); }
+
+// =====================================================================
+//  Drawing: characters
+// =====================================================================
+const LOOKS = {
+  oranus:  { color: WHITE,     back: '#8f8f8f', head: WHITE,     thick: 7,  scale: 1,    scarf: true },
+  grunt:   { color: '#7f7f7f', back: '#4a4a4a', head: '#0b0b0b', thick: 7,  scale: 1,    mask: true },
+  brute:   { color: '#6b6b6b', back: '#3c3c3c', head: '#0b0b0b', thick: 10, scale: 1.28, mask: true },
+  thrower: { color: '#959595', back: '#555555', head: '#0b0b0b', thick: 6,  scale: 0.95, mask: true, hood: true },
+  warden:  { color: '#b8b8b8', back: '#666666', head: '#0b0b0b', thick: 10, scale: 1.5,  mask: true, horns: true },
+  mantis:  { color: WHITE,     back: '#9c9c9c', head: WHITE,     thick: 6,  scale: 0.95, hair: true, dress: true },
+};
+
+// Angles are measured from straight down; positive swings toward the facing direction
+function limb(x, y, a1, a2, l1, l2, face) {
+  const kx = x + Math.sin(a1) * l1 * face, ky = y + Math.cos(a1) * l1;
+  const ex = kx + Math.sin(a1 + a2) * l2 * face, ey = ky + Math.cos(a1 + a2) * l2;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(kx, ky); ctx.lineTo(ex, ey); ctx.stroke();
+  return { kx, ky, ex, ey };
+}
+
+function clawSpikes(seg) {
+  // Little barbs along the forearm, like a mantis' front legs
+  ctx.save();
+  ctx.lineWidth = 3;
+  const ang = Math.atan2(seg.ey - seg.ky, seg.ex - seg.kx);
+  for (let i = 1; i <= 4; i++) {
+    const t = i / 5;
+    const x = lerp(seg.kx, seg.ex, t), y = lerp(seg.ky, seg.ey, t);
+    const a = ang + Math.PI / 2;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * 10, y + Math.sin(a) * 10); ctx.stroke();
+  }
+  // A hooked blade past the wrist
+  ctx.beginPath(); ctx.moveTo(seg.ex, seg.ey);
+  ctx.lineTo(seg.ex + Math.cos(ang) * 14, seg.ey + Math.sin(ang) * 14);
+  ctx.lineTo(seg.ex + Math.cos(ang + 2.4) * 8 + Math.cos(ang) * 14, seg.ey + Math.sin(ang + 2.4) * 8 + Math.sin(ang) * 14);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawRig(x, y, face, pose, look, opts = {}) {
+  const s = look.scale;
+  ctx.save();
+  ctx.translate(x, y);
+  if (pose.rot) {
+    const cx = 0, cy = (pose.rotY || 0) * s;
+    ctx.translate(cx, cy); ctx.rotate(pose.rot * face); ctx.translate(-cx, -cy);
+  }
+  ctx.scale(s, s);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
+  if (opts.glow) { ctx.shadowColor = WHITE; ctx.shadowBlur = 14; }
+
+  const color = opts.flash ? WHITE : look.color;
+  const back = opts.flash ? WHITE : look.back;
+  const lean = pose.lean || 0;
+  const hipY = -46 + (pose.bob || 0);
+  const shX = Math.sin(lean) * 34 * face, shY = hipY - Math.cos(lean) * 34;
+  const hx = shX + Math.sin(lean) * 14 * face, hy = shY - 14;
+
+  // Scarf trails behind Oranus and flutters more when he moves
+  if (look.scarf) {
+    const sp = clamp(Math.abs(opts.vx || 0) / 280, 0, 1);
+    let px = shX, py = shY + 2;
+    for (let i = 1; i <= 8; i++) {
+      const nx = shX - face * i * (6 + sp * 2.5);
+      const ny = shY + 2 + i * (1.6 - sp * 0.9) + Math.sin(game.t * 10 - i * 0.8) * (1.2 + sp * 3);
+      ctx.strokeStyle = color; ctx.lineWidth = 6 - i * 0.55;
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(nx, ny); ctx.stroke();
+      px = nx; py = ny;
+    }
+  }
+  if (look.hair) {
+    ctx.strokeStyle = back; ctx.lineWidth = 3;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(hx - face * 4, hy - 4 + i * 2);
+      ctx.quadraticCurveTo(hx - face * (16 + i * 3), hy + 20, hx - face * (10 + i * 4), hy + 44 + i * 3);
+      ctx.stroke();
+    }
+  }
+
+  ctx.lineWidth = look.thick;
+  ctx.strokeStyle = back;
+  const armB = limb(shX, shY + 3, pose.armB[0], pose.armB[1], 19, 19, face);
+  if (opts.claws) clawSpikes(armB);
+  limb(0, hipY, pose.legB[0], pose.legB[1], 24, 25, face);
+  ctx.strokeStyle = color;
+  limb(0, hipY, pose.legF[0], pose.legF[1], 24, 25, face);
+
+  if (look.dress) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(shX * 0.3 - 7, hipY - 10); ctx.lineTo(shX * 0.3 + 7, hipY - 10);
+    ctx.lineTo(19 + (pose.dressSway || 0), hipY + 36); ctx.lineTo(-19 + (pose.dressSway || 0), hipY + 36);
+    ctx.closePath(); ctx.fill();
+  }
+
+  ctx.lineWidth = look.thick * 1.25;
+  ctx.beginPath(); ctx.moveTo(0, hipY); ctx.lineTo(shX, shY); ctx.stroke();
+
+  if (opts.ropes) {
+    ctx.strokeStyle = '#a8a8a8'; ctx.lineWidth = 2;
+    for (const k of [0.35, 0.6]) {
+      const ry = lerp(shY, hipY, k), rx = lerp(shX, 0, k);
+      ctx.beginPath(); ctx.ellipse(rx, ry, 10, 3, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  // Head
+  ctx.fillStyle = opts.flash ? WHITE : look.head;
+  ctx.strokeStyle = color; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(hx, hy, 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  if (look.mask && !opts.flash) {
+    ctx.strokeStyle = WHITE; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(hx + face * 1, hy - 1); ctx.lineTo(hx + face * 7, hy - 2); ctx.stroke();
+  }
+  if (look.hood) {
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(hx - face * 12, hy + 4); ctx.lineTo(hx - face * 4, hy - 20); ctx.lineTo(hx + face * 10, hy - 6); ctx.closePath(); ctx.fill();
+  }
+  if (look.horns) {
+    ctx.strokeStyle = color; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(hx - 6, hy - 8); ctx.quadraticCurveTo(hx - 12, hy - 20, hx - 4, hy - 26); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx + 6, hy - 8); ctx.quadraticCurveTo(hx + 12, hy - 20, hx + 4, hy - 26); ctx.stroke();
+  }
+
+  ctx.lineWidth = look.thick; ctx.strokeStyle = color;
+  const armF = limb(shX, shY + 3, pose.armF[0], pose.armF[1], 19, 19, face);
+  if (opts.claws) clawSpikes(armF);
+
+  ctx.restore();
+}
+
+// ---- Poses ----
+const P = {
+  idle: t => ({ lean: 0.06, bob: Math.sin(t * 3) * 1.2, armF: [0.5, 1.9], armB: [0.3, 2.1], legF: [0.22, -0.12], legB: [-0.18, -0.06] }),
+  run: t => {
+    const ph = t * 13, s = Math.sin(ph);
+    return {
+      lean: 0.22, bob: -Math.abs(Math.cos(ph)) * 3,
+      armF: [-s * 0.9 + 0.2, 1.4], armB: [s * 0.9 + 0.2, 1.4],
+      legF: [s * 0.75, -0.2 - Math.max(0, -Math.cos(ph)) * 1.1],
+      legB: [-s * 0.75, -0.2 - Math.max(0, Math.cos(ph)) * 1.1],
+    };
+  },
+  air: () => ({ lean: 0.1, armF: [2.2, 0.6], armB: [1.8, 0.8], legF: [0.9, -1.4], legB: [0.1, -0.9] }),
+  hurt: () => ({ lean: -0.35, armF: [-0.6, 0.4], armB: [-0.9, 0.6], legF: [0.3, -0.2], legB: [-0.3, -0.1] }),
+  limp: () => ({ lean: 0, armF: [0.3, 0.2], armB: [-0.3, 0.3], legF: [0.1, -0.05], legB: [-0.1, -0.05] }),
+  tuck: () => ({ lean: 0.4, bob: 18, armF: [1.4, 1.6], armB: [1.2, 1.8], legF: [1.6, -2.4], legB: [1.3, -2.2] }),
+  kneel: () => ({ lean: 0.18, bob: 32, armF: [-0.5, 0.5], armB: [-0.6, 0.4], legF: [1.0, -2.5], legB: [0.3, -1.8] }),
+  stand: t => ({ lean: 0.02, bob: Math.sin(t * 2) * 1, armF: [0.15, 0.3], armB: [-0.1, 0.3], legF: [0.06, -0.02], legB: [-0.06, -0.02] }),
+  // Mantis forelegs: upper arm thrust forward, forearm folded back down beneath it
+  pray: t => ({ lean: 0.12, bob: Math.sin(t * 3) * 1, armF: [1.85 + Math.sin(t * 4) * 0.05, 2.75], armB: [1.6, 2.8], legF: [0.06, -0.02], legB: [-0.06, -0.02] }),
+  strike: () => ({ lean: 0.55, armF: [1.65, 0.05], armB: [1.5, 0.1], legF: [0.7, -0.2], legB: [-0.6, -0.1] }),
+};
+
+function playerPose(p) {
+  const t = game.t;
+  switch (p.state) {
+    case 'light': {
+      const a = ATK.light[p.combo], u = p.t / a.dur;
+      const r = u < 0.3 ? u / 0.3 : u < 0.6 ? 1 : 1 - (u - 0.6) / 0.4;
+      if (p.combo === 2) {
+        return { lean: -0.2 * r, armF: [0.6, 1.8], armB: [0.2, 2], legF: [lerp(0.2, 1.55, r), lerp(-0.1, 0, r)], legB: [-0.2, -0.1] };
+      }
+      const punch = [lerp(0.6, 1.6, r), lerp(1.9, 0, r)], guard = [0.4, 2.0];
+      const base = { lean: 0.15 + r * 0.15, legF: [0.35, -0.15], legB: [-0.3, -0.05] };
+      return p.combo === 0 ? { ...base, armF: punch, armB: guard } : { ...base, armF: guard, armB: punch };
+    }
+    case 'heavy': {
+      const u = p.t / ATK.heavy.dur;
+      if (u < 0.5) {
+        const k = u / 0.5;
+        return { lean: lerp(0.06, -0.25, k), armF: [lerp(0.5, 3.0, k), lerp(1.9, 0.3, k)], armB: [lerp(0.3, 2.8, k), lerp(2.1, 0.4, k)], legF: [0.3, -0.15], legB: [-0.3, -0.05] };
+      }
+      const k = clamp((u - 0.5) / 0.2, 0, 1);
+      return { lean: lerp(-0.25, 0.5, k), armF: [lerp(3.0, 1.2, k), lerp(0.3, 0, k)], armB: [lerp(2.8, 1.0, k), 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
+    }
+    case 'dodge': return { ...P.tuck(), rot: (p.t / 0.36) * Math.PI * 2, rotY: -28 };
+    case 'hurt': return P.hurt();
+    case 'dying': case 'fallen': return { ...P.limp(), rot: -Math.PI / 2 * Math.min(1, p.t / 0.4) };
+  }
+  if (!p.onGround) return P.air();
+  if (Math.abs(p.vx) > 10) return P.run(t);
+  return P.idle(t);
+}
+
+function enemyPose(e) {
+  const t = game.t + e.seed;
+  if (e.dead) return { ...P.limp(), rot: -Math.PI / 2 * Math.min(1, e.deadT / 0.35) };
+  const u = e.state === 'windup' ? Math.min(1, e.t / (e.kind === 'dash' ? 0.55 : e.T.windup)) : 1;
+  if (e.state === 'windup') {
+    if (e.kind === 'throw') return { lean: -0.1, armF: [lerp(0.4, -2.3, u), 0.6], armB: [0.5, 1.5], legF: [0.3, -0.1], legB: [-0.3, -0.05] };
+    if (e.kind === 'dash') return { lean: 0.5, armF: [-1.0, 0.5], armB: [-1.2, 0.5], legF: [0.8, -0.6], legB: [-0.7, -0.3] };
+    if (e.type === 'grunt') return { lean: -0.12 * u, armF: [lerp(0.5, -0.8, u), 1.7], armB: [0.4, 2.0], legF: [0.3, -0.1], legB: [-0.3, -0.05] };
+    return { lean: -0.2 * u, armF: [lerp(0.5, 2.9, u), 0.3], armB: [lerp(0.3, 2.7, u), 0.4], legF: [0.35, -0.15], legB: [-0.35, -0.05] };
+  }
+  if (e.state === 'attack') {
+    if (e.kind === 'throw') return { lean: 0.25, armF: [1.4, 0.2], armB: [0.2, 1.5], legF: [0.4, -0.1], legB: [-0.4, -0.05] };
+    if (e.kind === 'dash') return { ...P.run(t * 1.6), lean: 0.6, armF: [1.5, 0], armB: [1.3, 0.1] };
+    if (e.type === 'grunt') return { lean: 0.3, armF: [1.6, 0], armB: [0.3, 2.0], legF: [0.45, -0.15], legB: [-0.35, -0.05] };
+    return { lean: 0.45, armF: [1.0, 0], armB: [0.9, 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
+  }
+  if (e.state === 'hurt') return P.hurt();
+  if (Math.abs(e.vx) > 5) return P.run(t * (e.T.speed / 150));
+  return P.idle(t);
+}
+
+function mantisPose() {
+  switch (mantis.state) {
+    case 'bound': return P.kneel();
+    case 'stand': return P.stand(game.t);
+    case 'pray': return P.pray(game.t);
+    case 'strike': return P.strike();
+  }
+}
+
+// =====================================================================
+//  Drawing: world
+// =====================================================================
+const FAR = (() => {
+  const r = seeded(7), out = [];
+  for (let x = -100; x < LEVEL_END * 0.15 + VW + 200; x += r() * 60 + 40) out.push({ x, w: r() * 70 + 40, h: r() * 120 + 60 });
+  return out;
+})();
+
+const MID = (() => {
+  const r = seeded(42), out = [];
+  const zoneAt = wx => ZONES.reduce((z, cur, i) => (wx >= cur.x ? i : z), 0);
+  for (let lx = -50; lx < LEVEL_END * 0.45 + VW; lx += r() * 140 + 110) {
+    const z = zoneAt(lx / 0.45);
+    const kinds = [['tree', 'fence', 'tree'], ['stall', 'house', 'stall'], ['pylon', 'pylon', 'post'], ['pillar', 'house', 'pillar']][z];
+    out.push({ x: lx, kind: kinds[Math.floor(r() * kinds.length)], w: r() * 60 + 60, h: r() * 80 + 90, seed: r() });
+  }
+  return out;
+})();
+
+function drawSky() {
+  const g = ctx.createLinearGradient(0, 0, 0, GROUND);
+  g.addColorStop(0, '#080808'); g.addColorStop(1, '#161616');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, GROUND);
+  const mx = 760 - camX * 0.02, my = 110;
+  const halo = ctx.createRadialGradient(mx, my, 30, mx, my, 140);
+  halo.addColorStop(0, 'rgba(242,242,242,0.12)'); halo.addColorStop(1, 'rgba(242,242,242,0)');
+  ctx.fillStyle = halo; ctx.fillRect(mx - 140, my - 140, 280, 280);
+  ctx.fillStyle = '#e6e6e6';
+  ctx.beginPath(); ctx.arc(mx, my, 42, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#0e0e0e';
+  ctx.beginPath(); ctx.arc(mx + 16, my - 8, 38, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawFar() {
+  ctx.fillStyle = '#121212';
+  const off = camX * 0.15;
+  for (const b of FAR) {
+    const x = b.x - off;
+    if (x + b.w < 0 || x > VW) continue;
+    ctx.fillRect(x, GROUND - b.h - 40, b.w, b.h + 40);
+  }
+}
+
+function drawMid() {
+  const off = camX * 0.45;
+  for (const o of MID) {
+    const x = o.x - off;
+    if (x + o.w < -60 || x > VW + 60) continue;
+    drawProp(o, x);
+  }
+  // Mantis' tower, with one lit window
+  const tx = MANTIS_X * 0.45 + 120 - off;
+  if (tx > -200 && tx < VW + 200) {
+    ctx.fillStyle = '#1b1b1b';
+    ctx.fillRect(tx, GROUND - 330, 110, 330);
+    ctx.beginPath(); ctx.moveTo(tx - 10, GROUND - 330); ctx.lineTo(tx + 55, GROUND - 410); ctx.lineTo(tx + 120, GROUND - 330); ctx.fill();
+    ctx.fillStyle = 0.5 + Math.sin(game.t * 2) * 0.1 > 0.5 ? '#d8d8d8' : '#bdbdbd';
+    ctx.fillRect(tx + 44, GROUND - 290, 22, 30);
+  }
+}
+
+function drawProp(o, x) {
+  const base = GROUND;
+  ctx.fillStyle = '#1b1b1b'; ctx.strokeStyle = '#1b1b1b';
+  switch (o.kind) {
+    case 'tree': {
+      ctx.lineWidth = 6; ctx.lineCap = 'round';
+      const tx = x + o.w / 2;
+      ctx.beginPath(); ctx.moveTo(tx, base); ctx.lineTo(tx, base - o.h); ctx.stroke();
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 4; i++) {
+        const by = base - o.h * (0.5 + i * 0.13), dir = i % 2 ? 1 : -1;
+        ctx.beginPath(); ctx.moveTo(tx, by); ctx.lineTo(tx + dir * (20 + o.seed * 20), by - 22); ctx.stroke();
+      }
+      break;
+    }
+    case 'fence':
+      ctx.lineWidth = 3;
+      for (let i = 0; i <= o.w; i += 16) ctx.fillRect(x + i, base - 38, 4, 38);
+      ctx.fillRect(x, base - 30, o.w, 3); ctx.fillRect(x, base - 16, o.w, 3);
+      break;
+    case 'stall':
+      ctx.fillRect(x, base - 60, o.w, 60);
+      ctx.fillStyle = '#242424';
+      ctx.beginPath(); ctx.moveTo(x - 10, base - 60); ctx.lineTo(x + o.w / 2, base - 90); ctx.lineTo(x + o.w + 10, base - 60); ctx.fill();
+      ctx.fillStyle = '#2c2c2c';
+      for (let i = 0; i < o.w; i += 18) ctx.fillRect(x + i, base - 60, 9, 8);
+      break;
+    case 'house':
+      ctx.fillRect(x, base - o.h, o.w, o.h);
+      for (let wy = base - o.h + 14; wy < base - 20; wy += 26)
+        for (let wx = x + 10; wx < x + o.w - 14; wx += 22) {
+          ctx.fillStyle = ((wx * 7 + wy * 3) | 0) % 5 === 0 ? '#555' : '#262626';
+          ctx.fillRect(wx, wy, 9, 12);
+        }
+      break;
+    case 'pylon':
+      ctx.fillRect(x + o.w / 2 - 6, base - o.h - 80, 12, o.h + 80);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x + o.w / 2, base - o.h - 80);
+      ctx.quadraticCurveTo(x + o.w / 2 + 120, base - 60, x + o.w / 2 + 240, base - o.h - 80); ctx.stroke();
+      break;
+    case 'post':
+      ctx.fillRect(x, base - 50, 6, 50);
+      break;
+    case 'pillar':
+      ctx.fillRect(x, base - o.h - 40, 30, o.h + 40);
+      ctx.fillRect(x - 6, base - o.h - 46, 42, 8);
+      break;
+  }
+}
+
+function drawGround() {
+  ctx.fillStyle = '#0c0c0c';
+  ctx.fillRect(0, GROUND, VW, VH - GROUND);
+  ctx.fillStyle = '#3a3a3a';
+  ctx.fillRect(0, GROUND, VW, 2);
+  ctx.fillStyle = '#1f1f1f';
+  const start = Math.floor(camX / 90) * 90;
+  for (let wx = start; wx < camX + VW + 90; wx += 90) ctx.fillRect(wx - camX, GROUND + 14 + ((wx / 90) % 3) * 9, 26, 2);
+  // Street lamps with soft cones of light
+  const ls = Math.floor(camX / 640) * 640 + 320;
+  for (let wx = ls; wx < camX + VW + 640; wx += 640) {
+    const x = wx - camX;
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(x - 2, GROUND - 170, 4, 170);
+    ctx.fillRect(x - 2, GROUND - 170, 24, 4);
+    const g = ctx.createLinearGradient(0, GROUND - 165, 0, GROUND);
+    g.addColorStop(0, 'rgba(242,242,242,0.10)'); g.addColorStop(1, 'rgba(242,242,242,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(x + 14, GROUND - 165); ctx.lineTo(x + 80, GROUND); ctx.lineTo(x - 52, GROUND); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#cfcfcf';
+    ctx.fillRect(x + 10, GROUND - 167, 10, 4);
+  }
+}
+
+// ---- Rain, grain and vignette for the noir look ----
+const rain = Array.from({ length: 140 }, () => ({ x: rand(0, VW + 200), y: rand(-VH, VH), len: rand(10, 22), spd: rand(650, 950) }));
+function updateRain(dt) {
+  for (const d of rain) {
+    d.y += d.spd * dt; d.x -= d.spd * 0.22 * dt;
+    if (d.y > VH) { d.y = rand(-60, -10); d.x = rand(0, VW + 200); }
+  }
+}
+function drawRain() {
+  ctx.strokeStyle = 'rgba(242,242,242,0.13)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const d of rain) { ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - d.len * 0.22, d.y + d.len); }
+  ctx.stroke();
+}
+
+const grain = Array.from({ length: 3 }, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 180;
+  const g = c.getContext('2d'), img = g.createImageData(180, 180);
+  for (let i = 0; i < img.data.length; i += 4) { const v = Math.random() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+  g.putImageData(img, 0, 0);
+  return c;
+});
+function drawGrain() {
+  ctx.save();
+  ctx.globalAlpha = 0.055;
+  ctx.fillStyle = ctx.createPattern(grain[Math.floor(game.t * 24) % 3], 'repeat');
+  ctx.translate(-rand(0, 180), -rand(0, 180));
+  ctx.fillRect(0, 0, VW + 180, VH + 180);
+  ctx.restore();
+}
+function drawVignette() {
+  const g = ctx.createRadialGradient(VW / 2, VH / 2, VH * 0.35, VW / 2, VH / 2, VH * 0.95);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.7)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+}
+
+// ---- Text helpers ----
+function wrapText(text, maxW) {
+  const words = text.split(' '), lines = [];
+  let line = '';
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; } else line = test;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawBubble(x, y, text) {
+  ctx.font = '14px "Special Elite", monospace';
+  const lines = wrapText(text, 200);
+  const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 20, h = lines.length * 18 + 12;
+  const bx = clamp(x - w / 2, camX + 8, camX + VW - w - 8), by = y - h;
+  ctx.fillStyle = WHITE;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, w, h, 6) : ctx.rect(bx, by, w, h); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x - 6, by + h); ctx.lineTo(x + 6, by + h); ctx.lineTo(x, by + h + 9); ctx.fill();
+  ctx.fillStyle = '#0a0a0a'; ctx.textAlign = 'left';
+  lines.forEach((l, i) => ctx.fillText(l, bx + 10, by + 20 + i * 18));
+}
+
+// Letters with optional inverted highlight boxes (for the m and o of IMmortal)
+function drawLetters(letters, cx, baseline, size, alpha = 1, gap = 6) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `900 ${size}px Cinzel, serif`;
+  ctx.textAlign = 'left';
+  const widths = letters.map(l => ctx.measureText(l.ch).width);
+  const total = widths.reduce((a, b) => a + b, 0) + gap * (letters.length - 1);
+  let x = cx - total / 2;
+  const boxes = [];
+  letters.forEach((l, i) => {
+    if (l.hl) {
+      const pad = Math.max(2, gap / 2 - 3); // leave a sliver between neighbouring boxes
+      ctx.fillStyle = WHITE;
+      ctx.fillRect(x - pad, baseline - size * 0.8, widths[i] + pad * 2, size * 0.94);
+      ctx.fillStyle = '#0a0a0a';
+      boxes.push({ x: x + widths[i] / 2, ch: l.ch });
+    } else ctx.fillStyle = WHITE;
+    ctx.fillText(l.ch, x, baseline);
+    x += widths[i] + gap;
+  });
+  ctx.restore();
+  return boxes;
+}
+const TITLE = [...'IMmortal'].map((ch, i) => ({ ch, hl: i === 2 || i === 3 }));
+const MORTAL = [...'I’M MORTAL'].map((ch, i) => ({ ch, hl: i === 4 || i === 5 }));
+
+// =====================================================================
+//  Drawing: scenes
+// =====================================================================
+function drawWorld() {
+  ctx.save();
+  ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
+  drawSky(); drawFar(); drawMid(); drawGround();
+
+  ctx.save();
+  ctx.translate(-camX, 0);
+
+  for (const s of splats) {
+    ctx.fillStyle = '#242424';
+    for (const b of s.blobs) { ctx.beginPath(); ctx.ellipse(s.x + b.dx, GROUND + 4, b.rx, b.ry, 0, 0, Math.PI * 2); ctx.fill(); }
+  }
+
+  if (game.arena) {
+    ctx.strokeStyle = 'rgba(242,242,242,0.12)'; ctx.lineWidth = 2; ctx.setLineDash([6, 10]);
+    for (const x of [game.arena.left + 6, game.arena.left + VW - 6]) { ctx.beginPath(); ctx.moveTo(x, GROUND - 200); ctx.lineTo(x, GROUND); ctx.stroke(); }
+    ctx.setLineDash([]);
+  }
+
+  // Mantis waits at the end of the road. When she reveals herself she grows taller.
+  const mx = mantis.x - mantis.lunge * 60;
+  const revealed = mantis.state === 'pray' || mantis.state === 'strike';
+  const grow = revealed ? (mantis.state === 'strike' ? 1 : ease(Math.min(1, mantis.t / 0.9))) : 0;
+  const mLook = { ...LOOKS.mantis, scale: lerp(LOOKS.mantis.scale, 1.35, grow), thick: lerp(6, 7.5, grow) };
+  drawRig(mx, GROUND, -1, mantisPose(), mLook, { ropes: mantis.state === 'bound', claws: revealed, glow: revealed });
+
+  for (const e of enemies) {
+    if (!e.dead) continue;
+    drawRig(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { alpha: 1 - clamp((e.deadT - 1.5) / 1, 0, 1) });
+  }
+  for (const e of enemies) {
+    if (e.dead) continue;
+    drawRig(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { flash: e.flash > 0, glow: e.state === 'windup' });
+    if (e.state === 'windup') {
+      ctx.fillStyle = WHITE; ctx.font = '900 22px Cinzel, serif'; ctx.textAlign = 'center';
+      ctx.fillText('!', e.x, e.y - e.T.h - 16);
+    }
+  }
+
+  const p = player;
+  const blink = p.inv > 0 && p.state !== 'dodge' && p.state !== 'hurt' && Math.floor(game.t * 14) % 2 === 0;
+  drawRig(p.x, p.y, p.face, playerPose(p), LOOKS.oranus, { vx: p.vx, alpha: blink ? 0.35 : 1 });
+
+  // Slash arcs while an attack is active
+  if (p.state === 'light' || p.state === 'heavy') {
+    const a = p.state === 'heavy' ? ATK.heavy : ATK.light[p.combo];
+    if (p.t >= a.active[0] - 0.02 && p.t <= a.active[1] + 0.05) {
+      ctx.strokeStyle = WHITE; ctx.lineWidth = p.state === 'heavy' ? 5 : 3;
+      ctx.globalAlpha = 0.85;
+      const cx = p.x + p.face * 18, cy = p.y - 62, r = a.reach * 0.8;
+      const s0 = p.state === 'heavy' ? -1.4 : -0.7, s1 = p.state === 'heavy' ? 1.0 : 0.5;
+      ctx.beginPath();
+      if (p.face > 0) ctx.arc(cx, cy, r, s0, s1); else ctx.arc(cx, cy, r, Math.PI - s1, Math.PI - s0);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  for (const k of projectiles) {
+    ctx.save(); ctx.translate(k.x, k.y); ctx.rotate(k.rot);
+    ctx.strokeStyle = WHITE; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(9, 0); ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.strokeStyle = WHITE;
+  for (const pt of particles) {
+    ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+    ctx.lineWidth = 2;
+    const sp = Math.hypot(pt.vx, pt.vy) || 1;
+    ctx.beginPath(); ctx.moveTo(pt.x, pt.y); ctx.lineTo(pt.x - pt.vx / sp * pt.len, pt.y - pt.vy / sp * pt.len); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  for (const r of rings) {
+    ctx.globalAlpha = 1 - r.t / 0.7; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(r.x, r.y, 20 + r.t * 420, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.textAlign = 'center';
+  for (const t of texts) {
+    ctx.globalAlpha = 1 - t.t / 0.9;
+    ctx.font = t.big ? '700 22px Cinzel, serif' : '16px "Special Elite", monospace';
+    ctx.fillStyle = t.big ? WHITE : '#d0d0d0';
+    ctx.fillText(t.text, t.x, t.y - t.t * 40);
+  }
+  ctx.globalAlpha = 1;
+
+  for (const e of enemies) if (e.say && !e.dead) drawBubble(e.x, e.y - e.T.h - 26, e.say.text);
+  if (mantis.say) drawBubble(mantis.x, GROUND - 120, mantis.say.text);
+
+  ctx.restore();
+  drawRain();
+  if (game.flash > 0) {
+    ctx.fillStyle = `rgba(242,242,242,${game.flash * 0.35})`;
+    ctx.fillRect(0, 0, VW, VH);
+  }
+  ctx.restore();
+}
+
+function drawHUD() {
+  const p = player;
+  const x = 24, y = 22;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = WHITE; ctx.font = '700 16px Cinzel, serif';
+  ctx.fillText('ORANUS', x, y + 12);
+  ctx.font = '14px "Special Elite", monospace'; ctx.fillStyle = '#9a9a9a';
+  ctx.fillText(`life ${toRoman(game.deaths + 1)}`, x + 92, y + 12);
+
+  // HP bar is always drawn at the original 100 HP width, so lost capacity stays visible
+  const bw = 240, bh = 12, by = y + 22;
+  const maxW = bw * p.maxHp / BASE_HP, hpW = bw * Math.max(0, p.hp) / BASE_HP;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x + maxW, by, bw - maxW, bh); ctx.clip();
+  ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = 1;
+  for (let i = -bh; i < bw; i += 6) { ctx.beginPath(); ctx.moveTo(x + i, by + bh); ctx.lineTo(x + i + bh, by); ctx.stroke(); }
+  ctx.restore();
+  ctx.fillStyle = '#333'; ctx.fillRect(x, by, maxW, bh);
+  ctx.fillStyle = WHITE; ctx.fillRect(x, by, hpW, bh);
+  ctx.strokeStyle = WHITE; ctx.lineWidth = 1.5; ctx.strokeRect(x, by, bw, bh);
+  ctx.fillStyle = '#bdbdbd'; ctx.font = '14px "Special Elite", monospace';
+  ctx.fillText(`HP ${Math.ceil(Math.max(0, p.hp))}/${Math.ceil(p.maxHp)}`, x, by + 30);
+  ctx.fillText(`DMG ${p.dmg.toFixed(1)}`, x + 130, by + 30);
+
+  // Progress: the O travels toward the M
+  const tx = VW - 270, tw = 230, ty = 38;
+  ctx.strokeStyle = '#5a5a5a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx + tw, ty); ctx.stroke();
+  const prog = clamp(p.x / (MANTIS_X - 115), 0, 1);
+  ctx.strokeStyle = WHITE;
+  ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx + tw * prog, ty); ctx.stroke();
+  for (const [lx, ch] of [[tx + tw, 'M'], [tx + tw * prog, 'O']]) {
+    ctx.fillStyle = WHITE; ctx.fillRect(lx - 10, ty - 11, 20, 22);
+    ctx.fillStyle = '#0a0a0a'; ctx.font = '900 15px Cinzel, serif'; ctx.textAlign = 'center';
+    ctx.fillText(ch, lx, ty + 6);
+  }
+  ctx.textAlign = 'left';
+
+  if (bossRef && !bossRef.dead) {
+    const w = 420, bx = (VW - w) / 2, byy = VH - 42;
+    ctx.fillStyle = WHITE; ctx.font = '700 14px Cinzel, serif'; ctx.textAlign = 'center';
+    ctx.fillText('THE WARDEN', VW / 2, byy - 8);
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(bx, byy, w, 8);
+    ctx.fillStyle = WHITE; ctx.fillRect(bx, byy, w * Math.max(0, bossRef.hp) / bossRef.T.hp, 8);
+    ctx.strokeStyle = WHITE; ctx.lineWidth = 1; ctx.strokeRect(bx, byy, w, 8);
+  }
+
+  if (game.goArrow > 0 && !game.arena && Math.floor(game.t * 3) % 2 === 0) {
+    ctx.fillStyle = WHITE; ctx.font = '900 26px Cinzel, serif'; ctx.textAlign = 'right';
+    ctx.fillText('GO →', VW - 40, VH / 2 - 20);
+  }
+
+  if (game.banner) {
+    const b = game.banner, a = Math.min(1, b.t / 0.5) * (1 - clamp((b.t - 2.6) / 0.6, 0, 1));
+    ctx.globalAlpha = a; ctx.textAlign = 'center';
+    ctx.fillStyle = WHITE; ctx.font = '900 34px Cinzel, serif';
+    ctx.fillText(b.title, VW / 2, 150);
+    const w = ctx.measureText(b.title).width;
+    ctx.fillRect(VW / 2 - w / 2 - 70, 138, 50, 1); ctx.fillRect(VW / 2 + w / 2 + 20, 138, 50, 1);
+    if (b.sub) { ctx.font = '16px "Special Elite", monospace'; ctx.fillStyle = '#9a9a9a'; ctx.fillText(b.sub, VW / 2, 178); }
+    ctx.globalAlpha = 1;
+  }
+
+  if (muted) { ctx.fillStyle = '#777'; ctx.font = '12px "Special Elite", monospace'; ctx.textAlign = 'right'; ctx.fillText('sound off (M)', VW - 24, VH - 14); }
+  ctx.textAlign = 'left';
+}
+
+function drawDeathScreen() {
+  const d = game.dead, t = d.t;
+  ctx.fillStyle = `rgba(0,0,0,${Math.min(0.85, t * 1.6)})`;
+  ctx.fillRect(0, 0, VW, VH);
+  if (t < 0.3) return;
+  ctx.globalAlpha = Math.min(1, (t - 0.3) * 2);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = WHITE; ctx.font = '900 62px Cinzel, serif';
+  ctx.fillText(`DEATH ${toRoman(d.n)}`, VW / 2, 165);
+  ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = '#9a9a9a';
+  ctx.fillText(d.line, VW / 2, 205);
+
+  const k = ease(clamp((t - 0.9) / 1.0, 0, 1));
+  const hp = lerp(d.from.hp, d.to.hp, k), dmg = lerp(d.from.dmg, d.to.dmg, k);
+  ctx.font = '700 18px Cinzel, serif'; ctx.fillStyle = WHITE;
+  ctx.textAlign = 'right'; ctx.fillText('MAX HP', VW / 2 - 20, 275); ctx.fillText('DAMAGE', VW / 2 - 20, 345);
+  ctx.textAlign = 'left'; ctx.font = '20px "Special Elite", monospace';
+  ctx.fillText(`${Math.ceil(d.from.hp)}  →  ${Math.ceil(hp)}`, VW / 2 + 10, 275);
+  ctx.fillText(`${d.from.dmg.toFixed(1)}  →  ${dmg.toFixed(1)}`, VW / 2 + 10, 345);
+  // Capacity bars shrink as you watch
+  const bx = VW / 2 - 170, bw = 340;
+  ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
+  ctx.strokeRect(bx, 288, bw, 8); ctx.strokeRect(bx, 358, bw, 8);
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(bx, 288, bw * hp / BASE_HP, 8);
+  ctx.fillRect(bx, 358, bw * dmg / BASE_DMG, 8);
+
+  if (t > 1.6 && Math.floor(t * 2) % 2 === 0) {
+    ctx.textAlign = 'center'; ctx.font = '700 18px Cinzel, serif'; ctx.fillStyle = WHITE;
+    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO RISE' : 'PRESS ENTER TO RISE', VW / 2, 440);
+  }
+  ctx.globalAlpha = 1; ctx.textAlign = 'left';
+}
+
+function drawPause() {
+  ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, 0, VW, VH);
+  ctx.textAlign = 'center'; ctx.fillStyle = WHITE;
+  ctx.font = '900 46px Cinzel, serif'; ctx.fillText('PAUSED', VW / 2, 200);
+  ctx.font = '17px "Special Elite", monospace'; ctx.fillStyle = '#b0b0b0';
+  ['← → / A D  move', '↑ / W / Space  jump', 'J / Z  strike (tap for a combo)', 'K / X  heavy strike', 'L / Shift  dodge roll', 'M  sound   ·   P  resume']
+    .forEach((l, i) => ctx.fillText(l, VW / 2, 250 + i * 28));
+  ctx.textAlign = 'left';
+}
+
+function drawCutsceneUI() {
+  const c = game.cut, bar = 62 * ease(c.bars);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, VW, bar); ctx.fillRect(0, VH - bar, VW, bar);
+  if (c.phase !== 'talk') return;
+  const l = c.lines[c.i];
+  if (!l.who) return;
+  // Sits below the characters' feet, over the bottom letterbox bar
+  const bx = 90, by = GROUND + 14, bw = VW - 180, bh = VH - GROUND - 22;
+  ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeStyle = WHITE; ctx.lineWidth = 1.5; ctx.strokeRect(bx, by, bw, bh);
+  ctx.fillStyle = l.who === 'MANTIS' ? WHITE : '#0a0a0a';
+  ctx.font = '900 15px Cinzel, serif';
+  const nw = ctx.measureText(l.who).width + 20;
+  if (l.who === 'ORANUS') { ctx.fillStyle = WHITE; ctx.fillRect(bx + 16, by - 12, nw, 24); ctx.fillStyle = '#0a0a0a'; }
+  else { ctx.fillStyle = '#0a0a0a'; ctx.fillRect(bx + 16, by - 12, nw, 24); ctx.strokeRect(bx + 16, by - 12, nw, 24); ctx.fillStyle = WHITE; }
+  ctx.textAlign = 'left';
+  ctx.fillText(l.who, bx + 26, by + 6);
+  ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = WHITE;
+  wrapText(c.text.slice(0, Math.floor(c.chars)), bw - 50).forEach((line, i) => ctx.fillText(line, bx + 24, by + 36 + i * 25));
+  if (c.chars >= c.text.length && Math.floor(game.t * 2.5) % 2 === 0) {
+    ctx.textAlign = 'right'; ctx.fillText('▼', bx + bw - 16, by + bh - 12); ctx.textAlign = 'left';
+  }
+}
+
+function drawTitleScreen() {
+  const saved = camX;
+  camX = 200 + Math.sin(game.t * 0.08) * 160;
+  drawSky(); drawFar(); drawMid(); drawGround();
+  drawRig(250, GROUND, 1, P.idle(game.t), LOOKS.oranus, { vx: 0 });
+  drawRain();
+  camX = saved;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, VW, VH);
+
+  const boxes = drawLetters(TITLE, VW / 2, 210, 100, 1, 16);
+  ctx.textAlign = 'center'; ctx.font = '15px "Special Elite", monospace'; ctx.fillStyle = '#a8a8a8';
+  boxes.forEach(b => ctx.fillText(b.ch === 'm' ? 'mantis' : 'oranus', b.x, 248));
+  ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = '#cfcfcf';
+  ctx.fillText('a love story with diminishing returns', VW / 2, 300);
+  if (Math.floor(game.t * 1.6) % 2 === 0) {
+    ctx.font = '700 20px Cinzel, serif'; ctx.fillStyle = WHITE;
+    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO BEGIN' : 'PRESS ENTER', VW / 2, 380);
+  }
+  ctx.font = '14px "Special Elite", monospace'; ctx.fillStyle = '#7a7a7a';
+  ctx.fillText('No checkpoints. Every death makes you weaker.', VW / 2, 488);
+  ctx.textAlign = 'left';
+}
+
+function drawIntro() {
+  ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, VW, VH);
+  drawRain();
+  const s = game.intro;
+  ctx.textAlign = 'center';
+  if (s.i < INTRO.length) {
+    ctx.font = '26px "Special Elite", monospace'; ctx.fillStyle = WHITE;
+    wrapText(INTRO[s.i].slice(0, Math.floor(s.chars)), 720).forEach((l, i) => ctx.fillText(l, VW / 2, 260 + i * 36));
+  } else {
+    ctx.font = '900 30px Cinzel, serif'; ctx.fillStyle = WHITE;
+    ctx.fillText('HOW TO FIGHT', VW / 2, 130);
+    ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = '#c8c8c8';
+    const lines = document.body.classList.contains('touch')
+      ? ['◀ ▶  move', '▲  jump', 'HIT  strike (tap for a combo)', 'HVY  heavy strike', 'ROLL  dodge through attacks']
+      : ['← → / A D  move', '↑ / W / Space  jump', 'J / Z  strike (tap for a combo)', 'K / X  heavy strike', 'L / Shift  dodge roll', 'P  pause   ·   M  sound'];
+    lines.forEach((l, i) => ctx.fillText(l, VW / 2, 185 + i * 32));
+    ctx.fillStyle = '#8a8a8a'; ctx.font = '16px "Special Elite", monospace';
+    ctx.fillText('Watch for the glow: an enemy that lights up is about to strike.', VW / 2, 410);
+    if (Math.floor(game.t * 1.6) % 2 === 0) {
+      ctx.font = '700 18px Cinzel, serif'; ctx.fillStyle = WHITE;
+      ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO BEGIN' : 'PRESS ENTER', VW / 2, 470);
+    }
+  }
+  ctx.font = '13px "Special Elite", monospace'; ctx.fillStyle = '#555';
+  ctx.fillText('enter: continue   ·   esc: skip', VW / 2, VH - 24);
+  ctx.textAlign = 'left';
+}
+
+function drawFinal() {
+  const t = game.final.t;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH);
+  drawRain();
+  ctx.textAlign = 'center';
+
+  if (t > 0.5 && t < 2.6) {
+    const a = Math.min(1, (t - 0.5) * 3) * (1 - clamp((t - 2.2) / 0.4, 0, 1));
+    ctx.globalAlpha = a;
+    ctx.font = '900 44px Cinzel, serif';
+    // Glitchy slices
+    for (let i = 0; i < 6; i++) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 240 + i * 8, VW, 8); ctx.clip();
+      const off = Math.random() < 0.25 ? rand(-14, 14) : 0;
+      ctx.fillStyle = WHITE;
+      ctx.fillText('RESPAWN FAILED', VW / 2 + off, 285);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (t > 2.8) {
+    const a1 = clamp((t - 2.8) / 0.8, 0, 1) * (1 - clamp((t - 4.8) / 0.8, 0, 1));
+    const a2 = clamp((t - 4.8) / 0.8, 0, 1);
+    if (a1 > 0) drawLetters(TITLE, VW / 2, 200, 92, a1, 16);
+    if (a2 > 0) drawLetters(MORTAL, VW / 2, 200, 92, a2, 16);
+  }
+  ctx.textAlign = 'center';
+  const lines = [[6.4, 'Oranus. Mantis.'], [7.3, 'Together, the praying mantis.'], [8.2, 'Where the female kills the male.']];
+  ctx.font = '21px "Special Elite", monospace';
+  lines.forEach(([at, text], i) => {
+    ctx.globalAlpha = clamp((t - at) / 0.7, 0, 1);
+    ctx.fillStyle = i === 2 ? WHITE : '#b8b8b8';
+    ctx.fillText(text, VW / 2, 290 + i * 34);
+  });
+  ctx.globalAlpha = clamp((t - 9.4) / 0.7, 0, 1);
+  ctx.font = '15px "Special Elite", monospace'; ctx.fillStyle = '#8a8a8a';
+  ctx.fillText(`deaths ${game.deaths}   ·   enemies defeated ${game.kills}   ·   final max HP ${Math.ceil(player.maxHp)}   ·   damage ${player.dmg.toFixed(1)}   ·   ${fmtTime(game.time)}`, VW / 2, 430);
+  ctx.globalAlpha = 1;
+  if (t > 10.4 && Math.floor(t * 1.6) % 2 === 0) {
+    ctx.font = '700 18px Cinzel, serif'; ctx.fillStyle = WHITE;
+    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO PLAY AGAIN' : 'PRESS ENTER TO PLAY AGAIN', VW / 2, 488);
+  }
+  ctx.textAlign = 'left';
+}
+
+function render() {
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  ctx.clearRect(0, 0, VW, VH);
+  switch (game.state) {
+    case 'title': drawTitleScreen(); break;
+    case 'intro': drawIntro(); break;
+    case 'final': drawFinal(); break;
+    default:
+      drawWorld();
+      if (game.state !== 'cutscene') drawHUD();
+      if (game.state === 'dead') drawDeathScreen();
+      if (game.state === 'paused') drawPause();
+      if (game.state === 'cutscene') drawCutsceneUI();
+  }
+  drawGrain();
+  drawVignette();
+  if (game.invert > 0) {
+    ctx.globalCompositeOperation = 'difference';
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, VW, VH);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+// =====================================================================
+let last = performance.now();
+function frame(now) {
+  // The first frame's timestamp can be earlier than `last`, so never let dt go negative
+  const dt = clamp((now - last) / 1000, 0, 0.05);
+  last = now;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+// Pause when the tab is hidden
+document.addEventListener('visibilitychange', () => { if (document.hidden && game.state === 'play') game.state = 'paused'; });
+</script>
+</body>
+</html>

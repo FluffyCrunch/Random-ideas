@@ -12,6 +12,7 @@ No big roadmaps, no ten-step plans. Just me playing with code, trying things out
 | --- | --- | --- |
 | [🌫️ Fog Mirror](fog-mirror/) | Turns your webcam into a steamy bathroom mirror you wipe clean with your hand | [Live ↗](https://fog-mirror-fluffycrunch.netlify.app) |
 | [🏓 Hand Pong](hand-pong/) | Pong where your hand is the controller: wave at the webcam to beat the CPU | [Live ↗](https://hand-pong-fluffycrunch.netlify.app) |
+| [🖤 IMmortal](immortal/) | A noir fighting game where every death makes you weaker, and the girl you're saving has a secret | [Live ↗](https://immortal-fluffycrunch.netlify.app) |
 
 *More coming whenever the next random idea hits.*
 
