@@ -241,6 +241,222 @@ function toggleMute() {
 }
 
 // =====================================================================
+//  Music: a small step sequencer, one track per place, crossfaded
+// =====================================================================
+const MUSIC_VOL = 0.38;
+const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+
+// Each bar is one chord, split into 8 steps. Lead notes are [step, midi note, length in steps].
+const TRACKS = {
+  // Title, ending: slow and sad
+  lament: {
+    bpm: 56, chords: [[57, 'm'], [53, 'M'], [60, 'M'], [52, 'M']],
+    pad: { vol: 0.035, cutoff: 700 }, drone: { vol: 0.05 },
+    arp: { voice: 'pluck', steps: [0, 3, 6], pattern: [0, 2, 1], octave: 12, vol: 0.06 },
+    lead: [[0, 72, 6], [6, 71, 2], [8, 69, 8], [16, 67, 6], [22, 69, 2], [24, 68, 8]], leadVol: 0.03,
+  },
+  // I. The Outskirts: lonely
+  outskirts: {
+    bpm: 70, chords: [[57, 'm'], [53, 'M'], [60, 'M'], [55, 'M']],
+    pad: { vol: 0.035, cutoff: 700 }, drone: { vol: 0.05 },
+    arp: { voice: 'pluck', steps: [0, 2, 4, 6], pattern: [0, 1, 2, 1], octave: 12, vol: 0.06 },
+    lead: [[0, 76, 4], [4, 74, 2], [6, 72, 2], [8, 72, 6], [14, 71, 2], [16, 69, 4], [20, 67, 4], [24, 67, 3], [27, 69, 1], [28, 71, 4]], leadVol: 0.028,
+  },
+  // II. The Market: restless
+  market: {
+    bpm: 84, chords: [[62, 'm'], [58, 'M'], [53, 'M'], [60, 'M']],
+    pad: { vol: 0.028, cutoff: 900 },
+    bass: { steps: [0, 3, 6], vol: 0.07, len: 2 },
+    arp: { voice: 'pluck', steps: [0, 1, 2, 3, 4, 5, 6, 7], pattern: [0, 1, 2, 1, 0, 1, 2, 1], octave: 12, vol: 0.045 },
+    drums: { hat: [2, 6], vol: 0.6 },
+    lead: [[0, 69, 2], [2, 72, 2], [4, 74, 4], [8, 74, 2], [10, 72, 2], [12, 70, 4], [16, 69, 3], [19, 67, 1], [20, 65, 4], [24, 64, 2], [26, 65, 2], [28, 67, 4]], leadVol: 0.026,
+  },
+  // III. The Bridge: wide and aching
+  bridge: {
+    bpm: 72, chords: [[52, 'm'], [60, 'M'], [57, 'm'], [59, 'M']],
+    pad: { vol: 0.045, cutoff: 600 }, drone: { vol: 0.06 },
+    arp: { voice: 'bell', steps: [0, 5], pattern: [2, 0], octave: 12, vol: 0.05 },
+    lead: [[0, 71, 8], [8, 72, 6], [14, 71, 2], [16, 69, 8], [24, 71, 4], [28, 75, 4]], leadVol: 0.03,
+  },
+  // IV. The Tower: dread, with a heartbeat
+  tower: {
+    bpm: 64, chords: [[60, 'm'], [56, 'M'], [53, 'm'], [55, 'M']],
+    pad: { vol: 0.04, cutoff: 500 }, drone: { vol: 0.06 },
+    arp: { voice: 'bell', steps: [0, 6], pattern: [0, 2], octave: 12, vol: 0.06 },
+    drums: { kick: [0, 1], vol: 0.5 },
+  },
+  // Hornet: proud and a little angry, but mostly tragic (D harmonic minor)
+  boss: {
+    bpm: 96, chords: [[62, 'm'], [58, 'M'], [55, 'm'], [57, 'M']],
+    pad: { vol: 0.045, cutoff: 1400 },
+    bass: { steps: [0, 1, 2, 3, 4, 5, 6, 7], pattern: [0, 0, 12, 0, 0, 0, 12, 0], vol: 0.085, len: 1 },
+    drums: { kick: [0, 3], snare: [4], vol: 1 },
+    lead: [[0, 69, 4], [4, 65, 1], [5, 67, 1], [6, 69, 2], [8, 70, 4], [12, 69, 2], [14, 67, 2], [16, 67, 3], [19, 65, 1], [20, 64, 2], [22, 62, 2], [24, 61, 6], [30, 64, 2]], leadVol: 0.05,
+  },
+  // Hornet's second form: same lament, faster, an octave higher, driving harder
+  boss2: {
+    bpm: 106, chords: [[62, 'm'], [58, 'M'], [55, 'm'], [57, 'M']],
+    pad: { vol: 0.05, cutoff: 1800 },
+    bass: { steps: [0, 1, 2, 3, 4, 5, 6, 7], pattern: [0, 12, 0, 12, 0, 12, 0, 12], vol: 0.09, len: 1 },
+    arp: { voice: 'pluck', steps: [0, 1, 2, 3, 4, 5, 6, 7], pattern: [0, 1, 2, 1, 0, 2, 1, 2], octave: 12, vol: 0.035 },
+    drums: { kick: [0, 2, 3, 4, 6], snare: [4], hat: [0, 1, 2, 3, 4, 5, 6, 7], vol: 1 },
+    lead: [[0, 81, 4], [4, 77, 1], [5, 79, 1], [6, 81, 2], [8, 82, 4], [12, 81, 2], [14, 79, 2], [16, 79, 3], [19, 77, 1], [20, 76, 2], [22, 74, 2], [24, 73, 6], [30, 76, 2]], leadVol: 0.045,
+  },
+  // The finale: quiet and heavy
+  finale: {
+    bpm: 58, chords: [[62, 'm'], [58, 'M'], [55, 'm'], [57, 'M']],
+    pad: { vol: 0.04, cutoff: 800 }, drone: { vol: 0.05 },
+    arp: { voice: 'bell', steps: [0, 4], pattern: [0, 2], octave: 12, vol: 0.05 },
+    lead: [[0, 74, 8], [8, 74, 4], [12, 72, 4], [16, 70, 8], [24, 69, 8]], leadVol: 0.03,
+  },
+};
+
+// Envelope: fade in over `a`, hold, then fade out by `t + dur`
+function env(g, t, a, peak, dur) {
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + a);
+  g.gain.setValueAtTime(peak, t + Math.max(a, dur * 0.6));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+}
+function osc(type, freq, t, dur, dest, detune = 0) {
+  const o = actx.createOscillator();
+  o.type = type; o.frequency.value = freq; o.detune.value = detune;
+  o.connect(dest); o.start(t); o.stop(t + dur + 0.05);
+  return o;
+}
+const VOICE = {
+  // Soft string pad: detuned saws through a low-pass filter
+  pad(notes, t, dur, o, dest) {
+    const f = actx.createBiquadFilter(), g = actx.createGain();
+    f.type = 'lowpass'; f.frequency.value = o.cutoff;
+    env(g, t, 0.9, o.vol, dur + 0.8);
+    f.connect(g).connect(dest);
+    for (const n of notes) for (const d of [-7, 7]) osc('sawtooth', midi(n), t, dur + 0.8, f, d);
+  },
+  pluck(n, t, vol, dest) {
+    const g = actx.createGain(), f = actx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 2400;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+    f.connect(g).connect(dest);
+    osc('triangle', midi(n), t, 1.1, f); osc('sine', midi(n) * 2, t, 0.5, f);
+  },
+  bell(n, t, vol, dest) {
+    const g = actx.createGain(), g2 = actx.createGain();
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
+    g2.gain.value = 0.3;
+    g.connect(dest); g2.connect(g);
+    osc('sine', midi(n), t, 2.6, g); osc('sine', midi(n) * 2.76, t, 1.2, g2);
+  },
+  bass(n, t, dur, vol, dest) {
+    const g = actx.createGain(), f = actx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 420;
+    env(g, t, 0.02, vol, dur);
+    f.connect(g).connect(dest);
+    osc('triangle', midi(n), t, dur, f); osc('sine', midi(n), t, dur, f);
+  },
+  // Singing lead: two detuned saws, softened, with a delayed vibrato
+  lead(n, t, dur, vol, dest) {
+    const g = actx.createGain(), f = actx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 2000;
+    env(g, t, 0.12, vol, dur + 0.25);
+    f.connect(g).connect(dest);
+    const lfo = actx.createOscillator(), depth = actx.createGain();
+    lfo.frequency.value = 5.5;
+    depth.gain.setValueAtTime(0, t); depth.gain.linearRampToValueAtTime(midi(n) * 0.007, t + 0.35);
+    lfo.connect(depth); lfo.start(t); lfo.stop(t + dur + 0.3);
+    for (const d of [-6, 6]) depth.connect(osc('sawtooth', midi(n), t, dur + 0.25, f, d).frequency);
+  },
+  kick(t, vol, dest) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.25);
+    g.gain.setValueAtTime(0.32 * vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(g).connect(dest); o.start(t); o.stop(t + 0.32);
+  },
+  snare(t, vol, dest) {
+    const s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+    s.buffer = noiseBuf; f.type = 'bandpass'; f.frequency.value = 1800;
+    g.gain.setValueAtTime(0.12 * vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    s.connect(f).connect(g).connect(dest); s.start(t, Math.random() * 0.5); s.stop(t + 0.2);
+  },
+  hat(t, vol, dest) {
+    const s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+    s.buffer = noiseBuf; f.type = 'highpass'; f.frequency.value = 7000;
+    g.gain.setValueAtTime(0.03 * vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    s.connect(f).connect(g).connect(dest); s.start(t, Math.random() * 0.5); s.stop(t + 0.06);
+  },
+};
+
+function playStep(tr, step, t) {
+  const T = tr.def, dest = tr.gain;
+  const stepDur = 60 / T.bpm / 2, bars = T.chords.length;
+  const bar = Math.floor(step / 8) % bars, s = step % 8, cycleStep = step % (bars * 8);
+  const [root, q] = T.chords[bar];
+  const tri = [root, root + (q === 'm' ? 3 : 4), root + 7];
+  const low = root - 12 - (root >= 59 ? 12 : 0);
+  if (s === 0 && T.pad) VOICE.pad(tri, t, stepDur * 8, T.pad, dest);
+  if (s === 0 && T.drone) VOICE.bass(low, t, stepDur * 8, T.drone.vol, dest);
+  if (T.bass && T.bass.steps.includes(s)) {
+    const k = T.bass.steps.indexOf(s);
+    VOICE.bass(low + (T.bass.pattern ? T.bass.pattern[k] : 0), t, stepDur * (T.bass.len || 1), T.bass.vol, dest);
+  }
+  if (T.arp && T.arp.steps.includes(s)) {
+    const k = T.arp.steps.indexOf(s);
+    VOICE[T.arp.voice](tri[T.arp.pattern[k % T.arp.pattern.length]] + (T.arp.octave || 0), t, T.arp.vol, dest);
+  }
+  if (T.lead) for (const [st, n, len] of T.lead) if (st === cycleStep) VOICE.lead(n, t, stepDur * len, T.leadVol, dest);
+  if (T.drums) {
+    const D = T.drums;
+    if (D.kick?.includes(s)) VOICE.kick(t, D.vol, dest);
+    if (D.snare?.includes(s)) VOICE.snare(t, D.vol, dest);
+    if (D.hat?.includes(s)) VOICE.hat(t, D.vol, dest);
+  }
+}
+
+const music = { master: null, tracks: [], name: null };
+
+function setTrack(name) {
+  if (music.name === name) return;
+  music.name = name;
+  const now = actx.currentTime;
+  for (const tr of music.tracks) {
+    if (tr.dying) continue;
+    tr.gain.gain.cancelScheduledValues(now);
+    tr.gain.gain.setValueAtTime(tr.gain.gain.value, now);
+    tr.gain.gain.linearRampToValueAtTime(0, now + 2);
+    tr.dying = now + 2.2;
+  }
+  if (!name) return;
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0, now); g.gain.linearRampToValueAtTime(1, now + 2);
+  g.connect(music.master);
+  music.tracks.push({ def: TRACKS[name], gain: g, step: 0, next: now + 0.05, dying: 0 });
+}
+
+// Which piece fits what's on screen right now
+function desiredTrack() {
+  if (game.state === 'title' || game.state === 'intro' || game.state === 'final') return 'lament';
+  if (game.state === 'cine' && cine.name === 'finale') return 'finale';
+  if (bossRef && !bossRef.dead) return bossRef.phase2 ? 'boss2' : 'boss';
+  return ['outskirts', 'market', 'bridge', 'tower'][Math.max(0, game.zoneIdx)];
+}
+
+function updateMusic() {
+  if (!actx || !noiseBuf) return;
+  if (!music.master) { music.master = actx.createGain(); music.master.gain.value = 0; music.master.connect(actx.destination); }
+  setTrack(desiredTrack());
+  const now = actx.currentTime;
+  // Quieter under cutscenes, the death screen and the pause menu
+  const duck = game.state === 'cine' ? 0.6 : game.state === 'dead' ? 0.35 : game.state === 'paused' ? 0.4 : 1;
+  music.master.gain.setTargetAtTime(muted ? 0 : MUSIC_VOL * duck, now, 0.3);
+  music.tracks = music.tracks.filter(tr => !tr.dying || now < tr.dying);
+  for (const tr of music.tracks) {
+    const stepDur = 60 / tr.def.bpm / 2;
+    if (tr.next < now - 0.3) tr.next = now + 0.05;   // catching up after the tab was hidden
+    while (tr.next < now + 0.15) { playStep(tr, tr.step, tr.next); tr.step++; tr.next += stepDur; }
+  }
+}
+
+// =====================================================================
 //  World data
 // =====================================================================
 const ZONES = [
@@ -527,11 +743,31 @@ function damageEnemy(e, dmg, a) {
     return;
   }
   if (e.T.boss && !e.phase2Started && e.hp < e.T.hp / 2) { startPhaseTwo(e); return; }
+  // Hornet takes the damage but never flinches: whatever he was doing, he keeps doing it
+  if (e.T.boss) { e.kbv *= 0.25; return; }
   if (!e.T.armor || a.stagger) {
+    // Hits close together build up; once enough land, the enemy stops flinching and hits back
+    e.streak = game.t - (e.lastHitT ?? -9) < 1.2 ? (e.streak || 0) + 1 : 1;
+    e.lastHitT = game.t;
+    if (e.armored) { e.kbv *= 0.2; return; }
+    if (e.streak >= (POISE[e.type] || 3)) { counterAttack(e); return; }
     if (e.T.shield && a.stagger) popText(e.x, e.y - e.T.h - 34, 'BREAK', true);
     e.state = 'hurt'; e.t = 0;
-    e.stagger = e.T.boss ? 0.25 : e.T.shield && a.stagger ? 0.8 : a.stagger ? 0.45 : 0.26;
+    e.stagger = e.T.shield && a.stagger ? 0.8 : a.stagger ? 0.45 : 0.26;
   }
+}
+
+// How many hits in a row an enemy takes before it shrugs them off and strikes back
+const POISE = { grunt: 3, thrower: 2, guard: 3, brute: 2 };
+
+function counterAttack(e) {
+  e.armored = true;
+  e.streak = 0;
+  e.kbv *= 0.2;
+  e.face = Math.sign(player.x - e.x) || e.face;
+  e.hitsLeft = 1;
+  popText(e.x, e.y - e.T.h - 34, 'COUNTER', true);
+  startWindup(e, e.T.ranged ? 'throw' : e.type === 'brute' ? 'slam' : 'melee', 0.22);
 }
 
 // At half health Hornet drops to one knee, and a cutscene shows his second form
@@ -583,7 +819,7 @@ function hurtPlayer(dmg, dir, src) {
       popText(p.x, p.y - 160, 'PERFECT', true);
       ring(p.x, p.y - 70);
       sfx.parry();
-      if (src && !src.dead) { src.state = 'hurt'; src.t = 0; src.stagger = 0.8; }
+      if (src && !src.dead && !src.T.boss) { src.state = 'hurt'; src.t = 0; src.stagger = 0.8; src.armored = false; }
     }
     return false;
   }
@@ -761,7 +997,7 @@ function updateEnemy(e, dt) {
       if (e.kind !== 'throw' && !e.hitDone) { e.hitDone = true; meleeStrike(e, dist); }
       if (e.t >= 0.18) {
         if (e.hitsLeft > 1) { e.hitsLeft--; startWindup(e, e.kind, (e.kind === 'throw' ? 0.24 : 0.2) * haste); }
-        else { e.state = 'recover'; e.t = 0; }
+        else { e.state = 'recover'; e.t = 0; e.armored = false; }
       }
       break;
     case 'recover':
@@ -891,6 +1127,7 @@ function update(dt) {
   game.t += dt;
   updateRain(dt);
   if (consume('mute')) toggleMute();
+  updateMusic();
 
   switch (game.state) {
     case 'title':
