@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knock It Off!</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="flash"></div>
+
+<div id="hud" hidden>
+  <div class="panel score">
+    <div class="label">Chaos damage</div>
+    <div class="num" id="score">$0</div>
+    <div class="bar"><i id="scoreBar"></i></div>
+    <div class="sub"><span id="goalText">Goal $2,500</span><b id="comboText"></b></div>
+  </div>
+
+  <div class="panel timer"><i class="ic ic-timer"></i><span id="timer">2:30</span></div>
+
+  <div class="panel strikes" id="strikes" title="Times caught">
+    <i class="paw ic ic-paw"></i><i class="paw ic ic-paw"></i><i class="paw ic ic-paw"></i>
+  </div>
+
+  <div class="panel aware">
+    <div class="row" title="How suspicious your human is">
+      <i class="ic ic-eye"></i>
+      <div class="bar sus"><i id="suspBar"></i></div>
+    </div>
+    <div class="row" title="How guilty you look. Sit still (C) to cool down">
+      <i class="ic ic-cat"></i>
+      <div class="bar guilt"><i id="guiltBar"></i></div>
+    </div>
+  </div>
+
+  <div id="callouts"></div>
+  <div id="bubble" hidden></div>
+  <div id="ownerArrow" hidden><i class="ic ic-eye"></i></div>
+
+  <div id="hint">
+    <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
+    <span><kbd>Space</kbd> jump (twice!)</span>
+    <span><kbd>Click</kbd> swat</span>
+    <span><kbd>C</kbd> sit innocent</span>
+    <span><kbd>Q</kbd> meow</span>
+    <span><kbd>Right-drag</kbd> camera</span>
+  </div>
+</div>
+
+<button id="muteBtn" class="round" title="Sound (M)"><i class="ic ic-sound"></i><i class="ic ic-mute"></i></button>
+
+<section id="start" class="overlay">
+  <div class="card">
+    <div class="eyebrow">A 3D game about gravity</div>
+    <h1>KNOCK<br>IT OFF!</h1>
+    <p class="lead">You are <b>Mr. Biscuit</b>. Your human is home. The shelves are full. Gravity is not going to test itself.</p>
+    <ul class="rules">
+      <li>Cause <b>$2,500</b> of damage in <b>2:30</b></li>
+      <li>Three catches and you're <b>grounded</b></li>
+      <li>Furniture blocks the owner's view. Hide, or sit and look sweet.</li>
+    </ul>
+    <button id="playBtn" class="big">Start causing trouble</button>
+    <div class="keys">
+      <span><kbd>WASD</kbd> move</span><span><kbd>Space</kbd> jump (twice)</span><span><kbd>Shift</kbd> sprint</span>
+      <span><kbd>Click</kbd> / <kbd>F</kbd> swat</span><span><kbd>C</kbd> sit innocent</span><span><kbd>Q</kbd> meow to lure</span>
+      <span><kbd>Right-drag</kbd> / arrows camera</span><span><kbd>Esc</kbd> pause</span><span><kbd>M</kbd> sound</span>
+    </div>
+  </div>
+</section>
+
+<section id="pause" class="overlay dim" hidden>
+  <div class="card small">
+    <h2>PAUSED</h2>
+    <p class="lead">Even cats need a break.</p>
+    <button id="resumeBtn" class="big">Back to the crime</button>
+  </div>
+</section>
+
+<section id="end" class="overlay dim" hidden>
+  <div class="card">
+    <h2 id="endTitle">TIME'S UP</h2>
+    <p class="lead" id="endSub"></p>
+    <div class="rating" id="endRating"></div>
+    <div class="stats" id="endStats"></div>
+    <button id="againBtn" class="big">Go again</button>
+  </div>
+</section>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
