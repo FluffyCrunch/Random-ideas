@@ -41,16 +41,17 @@ What Mantis says at the end depends on how many times you died, and she quotes y
 
 ## How to play
 
-| Keyboard | Touch | Action |
+| Desktop | Touch | Action |
 | --- | --- | --- |
-| ← → or A D | ◀ ▶ | Move |
-| ↑, W or Space | ▲ | Jump (also clears knives and shockwaves) |
-| J or Z | HIT | Strike; tap repeatedly for a punch-punch-kick combo |
-| K or X | HVY | Heavy strike: slow, but staggers anything and breaks shields |
-| L or Shift | ROLL | Dodge roll; roll right as a hit lands for a **perfect dodge** |
-| P or Esc | II | Pause (Esc skips a cutscene) |
-| Enter | tap | Next line in a cutscene |
+| A D or ← → | ◀ ▶ | Move |
+| Space or ↑ | ▲ | Jump (also clears knives and shockwaves) |
+| Left click | HIT | Attack; click fast for a punch-punch-kick combo |
+| Right click | HVY | Heavy attack: slow, but staggers anything and breaks shields |
+| Ctrl | ROLL | Dodge roll; roll right as a hit lands for a **perfect dodge** |
+| P or Esc | II | Pause |
 | M | | Sound on or off |
+
+Cutscenes play by themselves and ignore every key and click, so you can't skip one by accident. To skip, **hold Esc for 5 seconds** (on touch, hold the II button).
 
 ## It's hard on purpose
 

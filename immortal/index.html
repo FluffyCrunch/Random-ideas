@@ -114,11 +114,12 @@ function capsule(x1, y1, r1, x2, y2, r2) {
 // ---------- Input (buffered so presses during hit-stop aren't lost) ----------
 const keys = {};
 const pressed = {};
+// Simple controls: move, jump, Ctrl to dodge. Attacks are on the mouse (see below).
+// W is deliberately not a jump key: Ctrl+W would close the browser tab mid-fight.
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-  ArrowUp: 'jump', KeyW: 'jump', Space: 'jump',
-  KeyJ: 'light', KeyZ: 'light', KeyK: 'heavy', KeyX: 'heavy',
-  KeyL: 'dodge', ShiftLeft: 'dodge', ShiftRight: 'dodge', KeyC: 'dodge',
+  ArrowUp: 'jump', Space: 'jump',
+  ControlLeft: 'dodge', ControlRight: 'dodge',
   Enter: 'confirm', KeyP: 'pause', Escape: 'pause', KeyM: 'mute',
 };
 function press(a) { if (!keys[a]) pressed[a] = game.t; keys[a] = true; }
@@ -137,9 +138,22 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { const a = KEYMAP[e.code]; if (a) release(a); });
 // A key released while the window was unfocused never sends keyup, so drop everything held
 addEventListener('blur', () => { for (const a in keys) keys[a] = false; });
-canvas.addEventListener('pointerdown', e => {
+// Mouse: left click attacks (and confirms menus), right click is the heavy attack.
+// mousedown fires for every button, unlike pointerdown, so both buttons always register.
+canvas.addEventListener('mousedown', e => {
   unlockAudio();
-  if (e.pointerType === 'touch') document.body.classList.add('touch');
+  if (e.button === 0) { press('light'); pressed.confirm = game.t; }
+  else if (e.button === 2) press('heavy');
+});
+addEventListener('mouseup', e => {
+  if (e.button === 0) release('light');
+  else if (e.button === 2) release('heavy');
+});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch') return;
+  unlockAudio();
+  document.body.classList.add('touch');
   pressed.confirm = game.t;
 });
 if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
@@ -277,6 +291,15 @@ const DEATH_LINES = [
   'Love hurts. Specifically, your max HP.', 'Respawning with 15% less everything.',
   "She's worth it. Probably.", "The body heals. The numbers don't.",
   'Death is temporary. Weakness is forever.', "Your enemies remember. Your muscles don't.",
+];
+
+const CONTROLS = [
+  'A D  or  ← →     move',
+  'Space  or  ↑     jump',
+  'Left click     attack (click fast for a combo)',
+  'Right click     heavy attack, breaks shields',
+  'Ctrl     dodge roll',
+  'P     pause   ·   M     sound',
 ];
 
 const INTRO = [
@@ -804,10 +827,12 @@ function update(dt) {
 
   switch (game.state) {
     case 'title':
-      if (consume('confirm') || consume('light') || consume('jump')) {
+      if (consume('confirm')) {
         resetGame();
         game.state = 'intro';
         game.intro = { i: 0, t: 0, chars: 0, doneT: null };
+        skipHold = 0;
+        clearInput();
         sfx.start();
       }
       break;
@@ -823,15 +848,14 @@ function update(dt) {
       game.dead.t += dt;
       enemies.forEach(e => updateEnemy(e, dt));
       updateEffects(dt);
-      if (game.dead.t > 1.6 && (consume('confirm') || consume('light') || consume('jump'))) rise();
+      if (game.dead.t > 1.6 && consume('confirm')) { rise(); clearInput(); }
       break;
     case 'cine': updateCine(dt); break;
     case 'final': {
       const f = game.final;
       f.t += dt;
-      const go = consume('confirm') || consume('light') || consume('jump');
-      if (go && f.t > 10.4) { resetGame(); game.state = 'title'; }
-      else if (go && f.t > 3) f.t = Math.max(f.t, 9.4);
+      if (f.t < 9.4 && holdToSkip(dt)) { f.t = 9.4; clearInput(); }
+      if (f.t > 10.4 && consume('confirm')) { resetGame(); game.state = 'title'; clearInput(); }
       break;
     }
   }
@@ -864,22 +888,23 @@ function updatePlay(dt) {
 function updateIntro(dt) {
   const s = game.intro;
   s.t += dt;
-  if (consume('pause')) { beginPlay(); return; }
   if (s.i < INTRO.length) {
+    // The story cards play by themselves; holding Esc jumps to the controls card
+    if (holdToSkip(dt)) { s.i = INTRO.length - 1; nextIntro(); return; }
     const full = INTRO[s.i];
     const before = Math.floor(s.chars);
     s.chars = Math.min(full.length, s.chars + dt * 30);
     if (Math.floor(s.chars) > before && before % 2 === 0) sfx.tick();
-    const done = s.chars >= full.length;
-    if (done && s.doneT == null) s.doneT = s.t;
-    if (consume('confirm') || consume('light') || consume('jump')) {
-      if (!done) s.chars = full.length;
-      else nextIntro();
-    } else if (done && s.t - s.doneT > 2.4) nextIntro();
-  } else if (consume('confirm') || consume('light') || consume('jump')) beginPlay();
+    if (s.chars >= full.length && s.doneT == null) s.doneT = s.t;
+    if (s.doneT != null && s.t - s.doneT > 2.4) nextIntro();
+  } else if (consume('confirm')) beginPlay();
 }
-function nextIntro() { Object.assign(game.intro, { i: game.intro.i + 1, t: 0, chars: 0, doneT: null }); }
-function beginPlay() { game.state = 'play'; sfx.start(); }
+function nextIntro() {
+  Object.assign(game.intro, { i: game.intro.i + 1, t: 0, chars: 0, doneT: null });
+  skipHold = 0;
+  clearInput();
+}
+function beginPlay() { game.state = 'play'; clearInput(); sfx.start(); }
 
 // =====================================================================
 //  Cutscenes: anime / manga style shots
@@ -1006,6 +1031,8 @@ function mantisStrike() {
 
 function playScene(name) {
   game.state = 'cine';
+  skipHold = 0;
+  clearInput();
   cine.name = name;
   projectiles = [];
   enemies.forEach(e => (e.say = null));
@@ -1034,6 +1061,8 @@ function nextShot() {
 }
 
 function endScene() {
+  clearInput();
+  skipHold = 0;
   if (cine.name === 'finale') { game.state = 'final'; game.final = { t: 0 }; return; }
   const h = props.find(p => p.kind === 'henchman');
   if (h) h.dead = true;
@@ -1067,16 +1096,34 @@ function updateCine(dt) {
     cine.chars = Math.min(cine.text.length, cine.chars + dt * 34);
     if (Math.floor(cine.chars) > before && before % 2 === 0) sfx.tick();
   }
+  // Cutscenes play like a film: no key or click advances them. Holding Esc for 5s skips.
+  if (holdToSkip(dt)) { skipScene(); return; }
   const typed = !cine.text || cine.chars >= cine.text.length;
-  const need = s.dur ?? (cine.text ? 1.5 + cine.text.length * 0.045 : 2);
-
-  if (consume('pause')) { skipScene(); return; }
-  if (consume('confirm') || consume('light') || consume('jump')) {
-    if (!typed) cine.chars = cine.text.length;
-    else if (!s.until || s.until()) nextShot();
-    return;
-  }
+  const need = s.dur ?? (cine.text ? 1.8 + cine.text.length * 0.055 : 2);
   if (typed && cine.t >= need && (!s.until || s.until())) nextShot();
+}
+
+const SKIP_HOLD = 5;
+let skipHold = 0;
+function holdToSkip(dt) {
+  skipHold = keys.pause ? skipHold + dt : 0;
+  if (skipHold < SKIP_HOLD) return false;
+  skipHold = 0;
+  return true;
+}
+// Throw away anything pressed during a cutscene so it can't leak into the fight
+function clearInput() { for (const a in pressed) pressed[a] = null; }
+
+function drawSkipHint(y = VH - 18) {
+  const touch = document.body.classList.contains('touch');
+  ctx.textAlign = 'right'; ctx.font = '12px "Special Elite", monospace';
+  ctx.fillStyle = skipHold > 0 ? '#cfcfcf' : '#555';
+  ctx.fillText(touch ? 'hold II to skip' : 'hold ESC to skip', VW - 16, y);
+  if (skipHold > 0) {
+    ctx.fillStyle = '#333'; ctx.fillRect(VW - 130, y + 6, 114, 3);
+    ctx.fillStyle = WHITE; ctx.fillRect(VW - 130, y + 6, 114 * Math.min(1, skipHold / SKIP_HOLD), 3);
+  }
+  ctx.textAlign = 'left';
 }
 
 function isTalking(who) {
@@ -1723,9 +1770,7 @@ function drawCine() {
     ctx.lineWidth = 5; ctx.fillStyle = WHITE;
     shown.forEach((l, i) => { if (!l) return; ctx.strokeText(l, VW / 2, baseY + i * 26); ctx.fillText(l, VW / 2, baseY + i * 26); });
   }
-  ctx.font = '12px "Special Elite", monospace'; ctx.fillStyle = '#555'; ctx.textAlign = 'right';
-  ctx.fillText('enter: next   ·   esc: skip', VW - 16, VH - 18);
-  ctx.textAlign = 'left';
+  drawSkipHint();
   if (t < 0.12 && s.kind !== 'impact') { ctx.fillStyle = `rgba(0,0,0,${1 - t / 0.12})`; ctx.fillRect(0, 0, VW, VH); }
 }
 
@@ -2538,7 +2583,7 @@ function drawDeathScreen() {
 
   if (t > 1.6 && Math.floor(t * 2) % 2 === 0) {
     ctx.textAlign = 'center'; ctx.font = '700 18px Cinzel, serif'; ctx.fillStyle = WHITE;
-    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO RISE' : 'PRESS ENTER TO RISE', VW / 2, 440);
+    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO RISE' : 'CLICK TO RISE', VW / 2, 440);
   }
   ctx.globalAlpha = 1; ctx.textAlign = 'left';
 }
@@ -2548,8 +2593,7 @@ function drawPause() {
   ctx.textAlign = 'center'; ctx.fillStyle = WHITE;
   ctx.font = '900 46px Cinzel, serif'; ctx.fillText('PAUSED', VW / 2, 190);
   ctx.font = '17px "Special Elite", monospace'; ctx.fillStyle = '#b0b0b0';
-  ['← → / A D  move', '↑ / W / Space  jump', 'J / Z  strike (tap for a combo)', 'K / X  heavy strike (breaks shields)', 'L / Shift  dodge roll (time it for a perfect dodge)', 'M  sound   ·   P  resume']
-    .forEach((l, i) => ctx.fillText(l, VW / 2, 240 + i * 28));
+  CONTROLS.forEach((l, i) => ctx.fillText(l, VW / 2, 240 + i * 28));
   ctx.textAlign = 'left';
 }
 
@@ -2569,7 +2613,7 @@ function drawTitleScreen() {
   ctx.fillText('a love story with diminishing returns', VW / 2, 300);
   if (Math.floor(game.t * 1.6) % 2 === 0) {
     ctx.font = '700 20px Cinzel, serif'; ctx.fillStyle = WHITE;
-    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO BEGIN' : 'PRESS ENTER', VW / 2, 380);
+    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO BEGIN' : 'CLICK TO BEGIN', VW / 2, 380);
   }
   ctx.font = '14px "Special Elite", monospace'; ctx.fillStyle = '#8a8a8a';
   ctx.fillText('No checkpoints. Every death makes you weaker.', VW / 2, 488);
@@ -2590,18 +2634,17 @@ function drawIntro() {
     ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = '#c8c8c8';
     const lines = document.body.classList.contains('touch')
       ? ['◀ ▶  move', '▲  jump', 'HIT  strike (tap for a combo)', 'HVY  heavy strike, breaks shields', 'ROLL  dodge through attacks']
-      : ['← → / A D  move', '↑ / W / Space  jump', 'J / Z  strike (tap for a combo)', 'K / X  heavy strike, breaks shields', 'L / Shift  dodge roll', 'P  pause   ·   M  sound'];
+      : CONTROLS;
     lines.forEach((l, i) => ctx.fillText(l, VW / 2, 170 + i * 32));
     ctx.fillStyle = '#8a8a8a'; ctx.font = '16px "Special Elite", monospace';
     ctx.fillText('An enemy that glows is about to strike. Roll at the last moment for a perfect dodge.', VW / 2, 390);
     ctx.fillText('They will surround you. Keep moving.', VW / 2, 414);
     if (Math.floor(game.t * 1.6) % 2 === 0) {
       ctx.font = '700 18px Cinzel, serif'; ctx.fillStyle = WHITE;
-      ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO BEGIN' : 'PRESS ENTER', VW / 2, 470);
+      ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO BEGIN' : 'CLICK TO BEGIN', VW / 2, 470);
     }
   }
-  ctx.font = '13px "Special Elite", monospace'; ctx.fillStyle = '#555';
-  ctx.fillText('enter: continue   ·   esc: skip', VW / 2, VH - 24);
+  if (s.i < INTRO.length) drawSkipHint(VH - 24);
   ctx.textAlign = 'left';
 }
 
@@ -2646,8 +2689,9 @@ function drawFinal() {
   ctx.globalAlpha = 1;
   if (t > 10.4 && Math.floor(t * 1.6) % 2 === 0) {
     ctx.font = '700 18px Cinzel, serif'; ctx.fillStyle = WHITE;
-    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO PLAY AGAIN' : 'PRESS ENTER TO PLAY AGAIN', VW / 2, 488);
+    ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO PLAY AGAIN' : 'CLICK TO PLAY AGAIN', VW / 2, 488);
   }
+  if (t < 9.4) drawSkipHint();
   ctx.textAlign = 'left';
 }
 
