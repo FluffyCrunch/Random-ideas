@@ -1,4 +1,4 @@
-# 🌫️ Fog Mirror
+# <img src="../assets/icons/cloud-fog.svg" width="28" height="28" alt=""> Fog Mirror
 
 **Live:** https://fog-mirror-fluffycrunch.netlify.app
 
@@ -17,9 +17,9 @@ Your camera turns into a fogged-up bathroom mirror. Wave your hand in front of t
 | **Wipe with** | Whole hand, all fingers, or just one finger |
 | **Brush size** | How wide each wipe is |
 | **Fog comeback** | How quickly the fog returns (0 = never) |
-| **💨 Fog it!** / <kbd>R</kbd> | Fog the whole mirror again |
-| **📸 Snap!** | Save a picture of the mirror |
-| **👀** / <kbd>H</kbd> | Fold the menu away |
+| <img src="../assets/icons/wind.svg" width="16" height="16" alt=""> **Fog it!** / <kbd>R</kbd> | Fog the whole mirror again |
+| <img src="../assets/icons/camera.svg" width="16" height="16" alt=""> **Snap!** | Save a picture of the mirror |
+| <img src="../assets/icons/eye.svg" width="16" height="16" alt=""> **Hide** / <kbd>H</kbd> | Fold the menu away |
 
 ## Tips
 

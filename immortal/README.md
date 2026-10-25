@@ -1,4 +1,4 @@
-# IMmortal
+# <img src="../assets/icons/skull.svg" width="28" height="28" alt=""> IMmortal
 
 **Live:** https://immortal-fluffycrunch.netlify.app
 
@@ -26,7 +26,7 @@ Your HP bar always shows your original 100, so the max HP you've lost stays cros
 
 **IM**m**o**rtal reads as *immortal*, and also as **I'M MORTAL**.
 
-The highlighted **m** and **o** are the two characters: **M**antis and **O**ranus. Put their names together and you get the praying mantis, the insect where the female kills the male. 🦗
+The highlighted **m** and **o** are the two characters: **M**antis and **O**ranus. Put their names together and you get the praying mantis, the insect where the female kills the male.
 
 ## The story
 
@@ -43,8 +43,8 @@ What Mantis says at the end depends on how many times you died, and she quotes y
 
 | Desktop | Touch | Action |
 | --- | --- | --- |
-| A D or ← → | ◀ ▶ | Move |
-| Space or ↑ | ▲ | Jump (also clears knives and shockwaves) |
+| <kbd>A</kbd> <kbd>D</kbd> or <kbd>←</kbd> <kbd>→</kbd> | Left / right buttons | Move |
+| <kbd>Space</kbd> or <kbd>↑</kbd> | Jump button | Jump (also clears knives and shockwaves) |
 | Left click | HIT | Attack; click fast for a punch-punch-kick combo |
 | Right click | HVY | Heavy attack: slow, but staggers anything and breaks shields |
 | Ctrl | ROLL | Dodge roll; roll right as a hit lands for a **perfect dodge** |

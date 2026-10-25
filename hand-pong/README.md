@@ -1,4 +1,4 @@
-# 🏓 Hand Pong
+# <img src="../assets/icons/gamepad-2.svg" width="28" height="28" alt=""> Hand Pong
 
 **Live:** https://hand-pong-fluffycrunch.netlify.app
 
@@ -7,7 +7,7 @@ Classic Pong, but your hand is the controller. Hold your hand up to the webcam a
 ## How to play
 
 1. Open the live link (Chrome works best).
-2. Pick **🖐️ Play with my hand** (allow camera access) or **🖱️ Use the mouse**.
+2. Pick <img src="../assets/icons/hand.svg" width="16" height="16" alt=""> **Play with my hand** (allow camera access) or <img src="../assets/icons/mouse.svg" width="16" height="16" alt=""> **Use the mouse**.
 3. Your paddle is the blue one on the right. Move your hand (or the mouse) up and down to block the ball.
 4. First to 7 wins.
 
@@ -16,8 +16,8 @@ Classic Pong, but your hand is the controller. Hold your hand up to the webcam a
 | Control | What it does |
 | --- | --- |
 | Hand / mouse up & down | Move your paddle |
-| <kbd>P</kbd> / <kbd>Esc</kbd> / ⏸️ | Pause and resume |
-| <kbd>M</kbd> / 🔊 | Sound on or off |
+| <kbd>P</kbd> / <kbd>Esc</kbd> / <img src="../assets/icons/pause.svg" width="16" height="16" alt="pause button"> | Pause and resume |
+| <kbd>M</kbd> / <img src="../assets/icons/volume-2.svg" width="16" height="16" alt="sound button"> | Sound on or off |
 
 ## Game feel
 
