@@ -242,7 +242,7 @@ const ZONES = [
 ];
 
 // Each encounter locks the screen until every wave is beaten.
-// Some end with a cutscene where someone tries to warn Oranus.
+// Some end with a cutscene where someone tries to warn Orans.
 const ENCOUNTERS = [
   { x: 650,  waves: [['grunt', 'grunt', 'grunt']] },
   { x: 1350, waves: [['grunt', 'thrower', 'grunt'], ['grunt', 'grunt']], scene: 'henchman' },
@@ -276,7 +276,7 @@ const ATK = {
 
 const TAUNTS = {
   any: [
-    'Turn back, Oranus.', "She's not who you think.", 'Who do you think pays us?',
+    'Turn back, Orans.', "She's not who you think.", 'Who do you think pays us?',
     'Go home, lover boy.', "She said you'd come.", 'Nothing personal. Strictly business.',
     "You really don't get it, do you?", 'Surround him!',
   ],
@@ -303,7 +303,7 @@ const CONTROLS = [
 ];
 
 const INTRO = [
-  'Oranus cannot die.',
+  'Orans cannot die.',
   'When he falls, he rises again.',
   'But every time he rises, a little less of him comes back.',
   'Tonight, they took Mantis.',
@@ -383,7 +383,7 @@ function updateEffects(dt) {
 // =====================================================================
 //  Player
 // =====================================================================
-// Shared by Oranus and the enemies, so nobody can stand somewhere the other can't reach
+// Shared by Orans and the enemies, so nobody can stand somewhere the other can't reach
 function arenaBounds() {
   const a = game.arena;
   return [a.left + 20, Math.min(a.left + VW - 20, MANTIS_X - 80)];
@@ -773,7 +773,7 @@ function spawnWave(list) {
   if (isBoss) {
     bossRef = enemies.find(e => e.type === 'warden' && !e.dead);
     say(bossRef, "She said you'd come. She said to make it hurt.", 3.5);
-    say(mantis, 'Oranus! Save me!', 3);
+    say(mantis, 'Orans! Save me!', 3);
     showBanner('THE WARDEN', 'keeper of the tower');
   } else if (Math.random() < 0.75) {
     const talker = enemies[enemies.length - 1];
@@ -909,7 +909,7 @@ function beginPlay() { game.state = 'play'; clearInput(); sfx.start(); }
 // =====================================================================
 //  Cutscenes: anime / manga style shots
 // =====================================================================
-const NAME = { oranus: 'ORANUS', mantis: 'MANTIS', henchman: 'HENCHMAN', oracle: 'OLD WOMAN', ghost: 'STRANGER' };
+const NAME = { orans: 'ORANS', mantis: 'MANTIS', henchman: 'HENCHMAN', oracle: 'OLD WOMAN', ghost: 'STRANGER' };
 const L = (who, text) => ({ who: NAME[who], text });
 const WIDE = (o = {}) => ({ kind: 'wide', zoom: 0.012, ...o });
 const FACE = (who, expr, o = {}) => ({ kind: 'face', who, expr, ...o });
@@ -929,23 +929,23 @@ const SCENES = {
   henchman: () => [
     WIDE({ dur: 2.4 }),
     FACE('henchman', 'dying', { bg: 'rain', line: L('henchman', 'Heh... you really came all this way for her?') }),
-    FACE('oranus', 'determined', { side: 'right', line: L('oranus', 'Where is she?') }),
+    FACE('orans', 'determined', { side: 'right', line: L('orans', 'Where is she?') }),
     FACE('henchman', 'pained', { side: 'left', bg: 'rain', line: L('henchman', 'The tower. But listen to me, boy...') }),
     EYES('henchman', 'pained', { bg: 'focus', sfx: 'sting', line: L('henchman', "She's not what you think she is.") }),
-    FACE('oranus', 'angry', { bg: 'speed', shake: 8, line: L('oranus', 'Liar!') }),
+    FACE('orans', 'angry', { bg: 'speed', shake: 8, line: L('orans', 'Liar!') }),
     FACE('henchman', 'dying', { bg: 'rain', close: true, line: L('henchman', 'Ask her... who pays us...') }),
     WIDE({ dur: 2.6, enter: () => { const h = props.find(p => p.kind === 'henchman'); if (h) h.dead = true; sfx.thud(); } }),
   ],
 
   oracle: () => [
     WIDE({ line: L('oracle', 'Boy. The one with the scarf.') }),
-    FACE('oranus', 'neutral', { side: 'right', line: L('oranus', "I don't have time, old woman.") }),
+    FACE('orans', 'neutral', { side: 'right', line: L('orans', "I don't have time, old woman.") }),
     FACE('oracle', 'wise', { side: 'left', line: L('oracle', 'I read her palm once.') }),
     EYES('oracle', 'reveal', { bg: 'focus', sfx: 'sting', line: L('oracle', 'Three husbands before you.') }),
     FACE('oracle', 'wise', { bg: 'rain', line: L('oracle', 'All of them immortal. All of them gone.') }),
-    FACE('oranus', 'shock', { bg: 'focus', shake: 6, line: L('oranus', '...Three?') }),
+    FACE('orans', 'shock', { bg: 'focus', shake: 6, line: L('orans', '...Three?') }),
     FACE('oracle', 'knowing', { side: 'left', line: L('oracle', 'The mantis loves her mate too. Right up until she gets hungry.') }),
-    FACE('oranus', 'determined', { bg: 'speed', side: 'right', line: L('oranus', "You're wrong about her.") }),
+    FACE('orans', 'determined', { bg: 'speed', side: 'right', line: L('orans', "You're wrong about her.") }),
     WIDE({ dur: 2.8, update: walkOn, line: L('oracle', 'They never listen.') }),
   ],
 
@@ -954,13 +954,13 @@ const SCENES = {
     return [
       WIDE({ dur: 2.6, enter: () => sfx.chains() }),
       FACE('ghost', 'empty', { bg: 'rain', line: L('ghost', 'Another one... Let me guess. She was taken.') }),
-      FACE('oranus', 'determined', { side: 'right', line: L('oranus', 'Who are you?') }),
+      FACE('orans', 'determined', { side: 'right', line: L('orans', 'Who are you?') }),
       FACE('ghost', 'sad', { side: 'left', bg: 'rain', line: L('ghost', "Her last husband. I couldn't die either.") }),
       FACE('ghost', 'empty', { line: L('ghost', d > 0
         ? "I came back eleven times. Each time, a little less of me. You've already started. I can see it."
         : 'I came back eleven times. Each time, a little less of me.') }),
       EYES('ghost', 'desperate', { bg: 'focus', shake: 6, sfx: 'sting', line: L('ghost', "Turn around! While there's still something left of you!") }),
-      SPLIT({ who: 'oranus', expr: 'pained' }, { who: 'ghost', expr: 'empty', bg: 'rain' }, { line: L('oranus', '...I have to hear it from her.') }),
+      SPLIT({ who: 'orans', expr: 'pained' }, { who: 'ghost', expr: 'empty', bg: 'rain' }, { line: L('orans', '...I have to hear it from her.') }),
       FACE('ghost', 'sad', { bg: 'rain', close: true, line: L('ghost', "Then you're already gone.") }),
       WIDE({ dur: 2.6, update: walkOn }),
     ];
@@ -970,32 +970,32 @@ const SCENES = {
     const d = game.deaths, p = player;
     return [
       WIDE({ update: walkToMantis, until: () => player.vx === 0, dur: 1.2 }),
-      FACE('oranus', 'soft', { side: 'right', line: L('oranus', "Mantis! I'm here. It's over.") }),
+      FACE('orans', 'soft', { side: 'right', line: L('orans', "Mantis! I'm here. It's over.") }),
       FACE('mantis', 'downcast', { side: 'left', bg: 'rain', line: L('mantis', '...You came.') }),
       FACE('mantis', 'soft', { line: L('mantis', d === 0 ? 'Not a single death? How... impressive.' : `Of course you came. ${d} ${d === 1 ? 'death' : 'deaths'}, and you still came.`) }),
-      FACE('oranus', 'smile', { side: 'right', line: L('oranus', "Let's go home.") }),
+      FACE('orans', 'smile', { side: 'right', line: L('orans', "Let's go home.") }),
       WIDE({ dur: 2.2, enter: () => { mantis.state = 'stand'; mantis.t = 0; burst(MANTIS_X, GROUND - 70, 14, 220); sfx.rope(); } }),
       EYES('mantis', 'reveal', { bg: 'focus', sfx: 'sting', line: L('mantis', 'Home?') }),
-      FACE('mantis', 'sinister', { bg: 'dark', line: L('mantis', 'Oranus... who do you think hired them?') }),
-      FACE('oranus', 'shock', { bg: 'focus', shake: 8, line: L('oranus', '...What?') }),
+      FACE('mantis', 'sinister', { bg: 'dark', line: L('mantis', 'Orans... who do you think hired them?') }),
+      FACE('orans', 'shock', { bg: 'focus', shake: 8, line: L('orans', '...What?') }),
       FACE('mantis', 'sinister', { bg: 'dark', side: 'left', line: L('mantis', "You can't be killed. Believe me, I tried.") }),
       FACE('mantis', 'reveal', { bg: 'speed', line: L('mantis', d === 0
         ? 'So I sent an army to wear you down. You were supposed to break.'
         : 'So I let them kill you. Again and again. And every time, you came back a little weaker.') }),
-      SPLIT({ who: 'oranus', expr: 'pained' }, { who: 'mantis', expr: 'sinister', bg: 'dark' }, { line: L('mantis', d === 0
+      SPLIT({ who: 'orans', expr: 'pained' }, { who: 'mantis', expr: 'sinister', bg: 'dark' }, { line: L('mantis', d === 0
         ? "Doesn't matter. I'll do it myself."
         : `Look at you. ${Math.ceil(p.maxHp)} HP. ${p.dmg.toFixed(1)} damage. Barely a man.`) }),
       FACE('mantis', 'sinister', { bg: 'dark', scale: 1.95, zoom: 0.05, line: L('mantis', 'Did you know, darling?') }),
       EYES('mantis', 'reveal', { bg: 'focus', shake: 4, line: L('mantis', 'The female praying mantis... eats her mate.') }),
       WIDE({ dur: 2.0, zoom: 0.04, enter: () => { mantis.state = 'pray'; mantis.t = 0; game.shake = 6; sfx.rumble(); } }),
       IMPACT('SHNK!!', { enter: mantisStrike }),
-      FACE('oranus', 'dying', { bg: 'flash', close: true, dur: 2.6, line: L('oranus', '...Mantis...') }),
+      FACE('orans', 'dying', { bg: 'flash', close: true, dur: 2.6, line: L('orans', '...Mantis...') }),
       WIDE({ dur: 3.4, zoom: -0.02, enter: () => { mantis.state = 'pray'; } }),
     ];
   },
 };
 
-// Puts the person giving the warning into the world near Oranus
+// Puts the person giving the warning into the world near Orans
 const SCENE_INIT = {
   henchman: () => {
     const e = game.lastKilled, x = e ? e.x : player.x + 110;
@@ -1183,8 +1183,8 @@ function shoulderPath(fill) {
   ctx.closePath(); ctx.fill(); ctx.stroke();
 }
 
-// ---- Oranus ----
-function oranusHairBack() {
+// ---- Orans ----
+function oransHairBack() {
   ctx.fillStyle = INK;
   ctx.beginPath(); ctx.ellipse(0, -34, 90, 86, 0, 0, Math.PI * 2); ctx.fill();
   for (const s of [-1, 1]) {
@@ -1193,14 +1193,14 @@ function oranusHairBack() {
     ctx.closePath(); ctx.fill();
   }
 }
-function oranusCoat() {
+function oransCoat() {
   shoulderPath('#161616');
   ctx.strokeStyle = '#8a8a8a'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(112, 155); ctx.quadraticCurveTo(196, 180, 204, 320); ctx.stroke();
   ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = 2.5;
   ctx.beginPath(); ctx.moveTo(-64, 150); ctx.lineTo(-12, 330); ctx.moveTo(64, 150); ctx.lineTo(12, 330); ctx.stroke();
 }
-function oranusScarf() {
+function oransScarf() {
   ctx.fillStyle = PAPER; ctx.strokeStyle = INK; ctx.lineWidth = 3;
   const sw = Math.sin(game.t * 2) * 6;
   ctx.beginPath();
@@ -1216,7 +1216,7 @@ function oranusScarf() {
   ctx.beginPath(); ctx.moveTo(-68, 150); ctx.quadraticCurveTo(0, 192, 68, 150); ctx.lineTo(60, 168); ctx.quadraticCurveTo(0, 200, -60, 168); ctx.fill();
   ctx.restore();
 }
-function oranusHairFront() {
+function oransHairFront() {
   ctx.fillStyle = INK;
   const pts = [
     [-86, 10], [-80, -40], [-106, -62], [-76, -78], [-92, -112], [-48, -104], [-40, -140], [-8, -112], [18, -142], [30, -110],
@@ -1231,7 +1231,7 @@ function oranusHairFront() {
     ctx.beginPath(); ctx.moveTo(a, b); ctx.quadraticCurveTo((a + c) / 2, b - 7, c, d); ctx.stroke();
   }
 }
-function oranusScar() {
+function oransScar() {
   ctx.strokeStyle = INK; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(-54, 30); ctx.lineTo(-40, 58);
   ctx.moveTo(-52, 40); ctx.lineTo(-44, 37); ctx.moveTo(-48, 49); ctx.lineTo(-40, 46); ctx.stroke();
@@ -1409,7 +1409,7 @@ function gauntLines() {
 }
 
 const FACES = {
-  oranus:   { jaw: 1.04, lash: 0, browW: 1,   back: oranusHairBack, body: oranusCoat, front: oranusScarf, hair: oranusHairFront, mark: oranusScar },
+  orans:   { jaw: 1.04, lash: 0, browW: 1,   back: oransHairBack, body: oransCoat, front: oransScarf, hair: oransHairFront, mark: oransScar },
   mantis:   { jaw: 0.9,  lash: 3, browW: 0.7, back: mantisHairBack, body: mantisShoulders, front: mantisNecklace, hair: mantisHairFront, lips: true, mole: true },
   henchman: { jaw: 1.08, lash: 0, browW: 1.1, back: hoodBack('#1a1a1a'), body: hoodieBody, hair: hoodFront('#1a1a1a'), overlay: crackedMask },
   oracle:   { jaw: 0.95, lash: 1, browW: 0.8, back: hoodBack('#222'), body: shawlBody, hair: oracleHoodFront, mark: wrinkles, cloudyRight: true },
@@ -1777,7 +1777,7 @@ function drawCine() {
 //  Drawing: realistic silhouette characters
 // =====================================================================
 const LOOKS = {
-  oranus:  { scale: 1,    bulk: 1,    hair: 'spiky', coat: true, scarf: true },
+  orans:  { scale: 1,    bulk: 1,    hair: 'spiky', coat: true, scarf: true },
   grunt:   { scale: 1,    bulk: 1,    hood: 'short', mask: true },
   thrower: { scale: 0.97, bulk: 0.88, hood: 'long', mask: true },
   guard:   { scale: 1.04, bulk: 1.1,  helmet: true, shield: true },
@@ -2414,7 +2414,7 @@ function drawWorld() {
 
   const p = player;
   const blink = p.inv > 0 && p.state !== 'dodge' && p.state !== 'hurt' && Math.floor(game.t * 14) % 2 === 0;
-  drawFigure(p.x, p.y, p.face, playerPose(p), LOOKS.oranus, { vx: p.vx, alpha: blink ? 0.4 : 1 });
+  drawFigure(p.x, p.y, p.face, playerPose(p), LOOKS.orans, { vx: p.vx, alpha: blink ? 0.4 : 1 });
 
   // Slash arcs while an attack is active
   if (p.state === 'light' || p.state === 'heavy') {
@@ -2491,9 +2491,9 @@ function drawHUD() {
   const x = 24, y = 22;
   ctx.textAlign = 'left';
   ctx.fillStyle = WHITE; ctx.font = '700 16px Cinzel, serif';
-  ctx.fillText('ORANUS', x, y + 12);
+  ctx.fillText('ORANS', x, y + 12);
   ctx.font = '14px "Special Elite", monospace'; ctx.fillStyle = '#9a9a9a';
-  ctx.fillText(`life ${toRoman(game.deaths + 1)}`, x + 92, y + 12);
+  ctx.fillText(`life ${toRoman(game.deaths + 1)}`, x + 78, y + 12);
 
   // HP bar is always drawn at the original 100 HP width, so lost capacity stays visible
   const bw = 240, bh = 12, by = y + 22;
@@ -2600,14 +2600,14 @@ function drawTitleScreen() {
   const saved = camX;
   camX = 200 + Math.sin(game.t * 0.08) * 160;
   drawSky(); drawFar(); drawMid(); drawGround();
-  drawFigure(250, GROUND, 1, P.idle(game.t), LOOKS.oranus, { vx: 0 });
+  drawFigure(250, GROUND, 1, P.idle(game.t), LOOKS.orans, { vx: 0 });
   drawRain();
   camX = saved;
   ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, VW, VH);
 
   const boxes = drawLetters(TITLE, VW / 2, 210, 100, 1, 16);
   ctx.textAlign = 'center'; ctx.font = '15px "Special Elite", monospace'; ctx.fillStyle = '#a8a8a8';
-  boxes.forEach(b => ctx.fillText(b.ch === 'm' ? 'mantis' : 'oranus', b.x, 248));
+  boxes.forEach(b => ctx.fillText(b.ch === 'm' ? 'mantis' : 'orans', b.x, 248));
   ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = '#cfcfcf';
   ctx.fillText('a love story with diminishing returns', VW / 2, 300);
   if (Math.floor(game.t * 1.6) % 2 === 0) {
@@ -2675,7 +2675,7 @@ function drawFinal() {
     if (a2 > 0) drawLetters(MORTAL, VW / 2, 200, 92, a2, 16);
   }
   ctx.textAlign = 'center';
-  const lines = [[6.4, 'Oranus. Mantis.'], [7.3, 'Together, the praying mantis.'], [8.2, 'Where the female kills the male.']];
+  const lines = [[6.4, 'Orans. Mantis.'], [7.3, 'Together, the praying mantis.'], [8.2, 'Where the female kills the male.']];
   ctx.font = '21px "Special Elite", monospace';
   lines.forEach(([at, text], i) => {
     ctx.globalAlpha = clamp((t - at) / 0.7, 0, 1);

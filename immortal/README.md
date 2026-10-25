@@ -4,7 +4,7 @@
 
 > *a love story with diminishing returns*
 
-Oranus cannot die. When he falls, he rises again. But every time he rises, a little less of him comes back.
+Orans cannot die. When he falls, he rises again. But every time he rises, a little less of him comes back.
 
 Tonight, they took Mantis. Fight your way through the outskirts, the market, the bridge and the tower to save her. There are no checkpoints, only the way forward. Along the way, people keep trying to warn him about her.
 
@@ -26,16 +26,16 @@ Your HP bar always shows your original 100, so the max HP you've lost stays cros
 
 **IM**m**o**rtal reads as *immortal*, and also as **I'M MORTAL**.
 
-The highlighted **m** and **o** are the two characters: **M**antis and **O**ranus. Put their names together and you get the praying mantis, the insect where the female kills the male.
+The highlighted **m** and **o** are the two characters: **M**antis and **O**rans. Put their names together and you get the praying mantis, the insect where the female kills the male.
 
 ## The story
 
 Between fights, the game cuts to manga-style cutscenes: animated close-ups, extreme eye shots, focus lines, split panels and impact frames.
 
-- **The henchman:** a dying enemy in a cracked mask tells Oranus that Mantis is not what he thinks she is.
+- **The henchman:** a dying enemy in a cracked mask tells Orans that Mantis is not what he thinks she is.
 - **The old woman:** a blind fortune teller in the market once read Mantis' palm, and saw three husbands before him.
 - **The stranger:** a gaunt man chained to the bridge says he was her last husband, and he couldn't die either.
-- **The tower:** Oranus finally reaches her.
+- **The tower:** Orans finally reaches her.
 
 What Mantis says at the end depends on how many times you died, and she quotes your real final stats back at you.
 
