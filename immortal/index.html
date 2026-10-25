@@ -900,8 +900,8 @@ function updateIntro(dt) {
   } else if (consume('confirm')) beginPlay();
 }
 function nextIntro() {
+  // Note: skipHold is left alone, so holding Esc carries on across cards
   Object.assign(game.intro, { i: game.intro.i + 1, t: 0, chars: 0, doneT: null });
-  skipHold = 0;
   clearInput();
 }
 function beginPlay() { game.state = 'play'; clearInput(); sfx.start(); }
@@ -1062,7 +1062,6 @@ function nextShot() {
 
 function endScene() {
   clearInput();
-  skipHold = 0;
   if (cine.name === 'finale') { game.state = 'final'; game.final = { t: 0 }; return; }
   const h = props.find(p => p.kind === 'henchman');
   if (h) h.dead = true;
