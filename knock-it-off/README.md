@@ -16,8 +16,11 @@ This one is a proper game-dev project, not a single HTML file: **Three.js** for 
 | Left click or <kbd>F</kbd> | Swat whatever is in front of you |
 | <kbd>C</kbd> (hold) | Sit and look innocent |
 | <kbd>Q</kbd> | Meow, to lure your human over |
-| Right-drag, or arrow keys | Orbit the camera (mouse wheel zooms) |
-| <kbd>Esc</kbd> / <kbd>M</kbd> | Pause / sound on and off |
+| Move the mouse | Look around: the camera follows your mouse |
+| Mouse wheel | Zoom the camera in and out |
+| <kbd>Esc</kbd> / <kbd>M</kbd> | Pause and free your mouse / sound on and off |
+
+The game captures your mouse when a round starts, so there's nothing to hold down. Press <kbd>Esc</kbd> to get your cursor back (this also pauses), and click **Back to the crime** to jump back in. If your browser won't capture the mouse, holding the right mouse button and dragging, or the arrow keys, still turn the camera.
 
 **Tips**
 - Things break when they hit something hard enough. Light items like mugs shatter from a short fall; plants and laptops need a longer drop.

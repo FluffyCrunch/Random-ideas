@@ -59,6 +59,8 @@ export class Game {
     this.resize();
     addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); });
+    // Esc releases a captured mouse without the page seeing the key, so pause when that happens
+    this.input.onLockChange = locked => { if (!locked && this.state === 'playing') this.pause(); };
     const on = (id, fn) => document.getElementById(id).addEventListener('click', () => { this.sound.unlock(); this.sound.click(); fn(); });
     on('playBtn', () => this.begin());
     on('resumeBtn', () => this.resume());
@@ -117,6 +119,8 @@ export class Game {
     this.sound.unlock();
     this.resetRound();
     this.state = 'playing';
+    this.input.wantLock = true;
+    this.input.lock();
     for (const n of ['start', 'pause', 'end']) this.ui.hide(n);
     this.ui.show('hud');
     this.ui.el.hint.classList.remove('fade');
@@ -124,13 +128,27 @@ export class Game {
     this.hintTimer = setTimeout(() => this.ui.el.hint.classList.add('fade'), 14000);
   }
 
-  pause() { if (this.state !== 'playing') return; this.state = 'paused'; this.ui.show('pause'); }
-  resume() { if (this.state !== 'paused') return; this.state = 'playing'; this.ui.hide('pause'); }
+  pause() {
+    if (this.state !== 'playing') return;
+    this.state = 'paused';
+    this.input.wantLock = false;
+    this.input.unlock();
+    this.ui.show('pause');
+  }
+  resume() {
+    if (this.state !== 'paused') return;
+    this.state = 'playing';
+    this.input.wantLock = true;
+    this.input.lock();
+    this.ui.hide('pause');
+  }
   toggleMute() { this.sound.setMuted(!this.sound.muted); this.ui.setMuted(this.sound.muted); }
 
   finish(reason) {
     if (this.state !== 'playing') return;
     this.state = 'over';
+    this.input.wantLock = false;
+    this.input.unlock();     // give the cursor back for the end screen
     const win = reason === 'win';
     const goal = RULES.goal;
     const total = PLACEMENTS.length;
@@ -358,8 +376,9 @@ export class Game {
 
     // camera control: right-drag or arrow keys to orbit, wheel to zoom
     const cam = this.cam;
-    cam.yaw -= input.orbit.dx * 0.005;
-    cam.pitch = clamp(cam.pitch + input.orbit.dy * 0.004, 0.12, 1.15);
+    const sens = input.locked ? 0.0026 : 0.005;     // a captured mouse sends far more movement per swipe
+    cam.yaw -= input.orbit.dx * sens;
+    cam.pitch = clamp(cam.pitch + input.orbit.dy * sens * 0.8, 0.12, 1.15);
     cam.yaw += ((input.isDown('ArrowLeft') ? 1 : 0) - (input.isDown('ArrowRight') ? 1 : 0)) * 1.9 * dt;
     cam.pitch = clamp(cam.pitch + ((input.isDown('ArrowDown') ? 1 : 0) - (input.isDown('ArrowUp') ? 1 : 0)) * 1.1 * dt, 0.12, 1.15);
     cam.dist = clamp(cam.dist + input.wheel * 0.45, 3, 8.5);
