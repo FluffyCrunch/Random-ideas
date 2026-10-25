@@ -13,7 +13,7 @@ No big roadmaps, no ten-step plans. Just me playing with code, trying things out
 | <img src="assets/icons/cloud-fog.svg" width="16" height="16" alt=""> [Fog Mirror](fog-mirror/) | Turns your webcam into a steamy bathroom mirror you wipe clean with your hand | [Live <img src="assets/icons/external-link.svg" width="13" height="13" alt="">](https://fog-mirror-fluffycrunch.netlify.app) |
 | <img src="assets/icons/gamepad-2.svg" width="16" height="16" alt=""> [Hand Pong](hand-pong/) | Pong where your hand is the controller: wave at the webcam to beat the CPU | [Live <img src="assets/icons/external-link.svg" width="13" height="13" alt="">](https://hand-pong-fluffycrunch.netlify.app) |
 | <img src="assets/icons/skull.svg" width="16" height="16" alt=""> [IMmortal](immortal/) | A noir fighting game where every death makes you weaker, and the girl you're saving has a secret | [Live <img src="assets/icons/external-link.svg" width="13" height="13" alt="">](https://immortal-fluffycrunch.netlify.app) |
-| <img src="assets/icons/cat.svg" width="16" height="16" alt=""> [Knock It Off!](knock-it-off/) | A 3D chaos game: you're a cat, your human is home, and gravity needs testing. Built with Three.js, cannon-es and Vite | Coming soon |
+| <img src="assets/icons/cat.svg" width="16" height="16" alt=""> [Knock It Off!](knock-it-off/) | A 3D chaos game: you're a cat, your human is home, and gravity needs testing. Built with Three.js, cannon-es and Vite | [Live <img src="assets/icons/external-link.svg" width="13" height="13" alt="">](https://knock-it-off-fluffycrunch.netlify.app) |
 
 *More coming whenever the next random idea hits.*
 

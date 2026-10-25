@@ -1,5 +1,7 @@
 # <img src="../assets/icons/cat.svg" width="28" height="28" alt=""> Knock It Off!
 
+**Live:** https://knock-it-off-fluffycrunch.netlify.app
+
 A 3D game about gravity. You're **Mr. Biscuit**, a ginger cat home alone with a living room full of breakable things, right up until your human wanders in. Knock mugs, vases, cakes and a fishbowl off the shelves for chaos points before time runs out, without getting caught.
 
 This one is a proper game-dev project, not a single HTML file: **Three.js** for 3D rendering, **cannon-es** for rigid-body physics, **Vite** for the dev server and build, and separate ES modules for each part of the game.
@@ -71,3 +73,13 @@ npm run build
 ```
 
 This writes the finished game to `dist/`, which is what gets deployed. `npm run preview` serves that build locally.
+
+The build also **scrambles the game's own code** (`scripts/obfuscate.mjs`): variable and function names are replaced, strings are encoded, no source maps are published, and the console hook used in development is removed. That makes the live game's code hard to read or copy, but it can't make it secret, because a browser has to download the code to run the game.
+
+## Deploy
+
+Hosted on Netlify. Deploy only the built `dist` folder, never the source, from the repo root:
+
+```bash
+netlify deploy --prod --dir knock-it-off/dist --site c8371a45-9bfc-42f1-b2e6-75b6b30646fb
+```
