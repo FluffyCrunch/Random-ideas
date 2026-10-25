@@ -63,9 +63,11 @@ const LEVEL_END = 7200;
 const MANTIS_X = 7020;
 const BASE_HP = 100, BASE_DMG = 10;
 const DECAY = 0.85;                // each death keeps 85% of max HP and damage
-const MAX_ATTACKERS = 2;           // melee enemies allowed to swing at once
+const MIN_HP = 40, MIN_DMG = 5;    // weakness floors, so the game stays finishable
+const MAX_ATTACKERS = 3;           // melee enemies allowed to swing at once
 
-const WHITE = '#f2f2f2';
+const WHITE = '#f2f2f2', PAPER = '#f2f2f2', INK = '#0a0a0a';
+const BODY = '#0b0b0b', BACK = '#1f1f1f', RIM = '#a6a6a6';
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -90,7 +92,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const ease = t => t * t * (3 - 2 * t);
-function seeded(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+function seeded(seed) { seed = Math.max(1, Math.floor(seed)) % 2147483647 || 1; return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
 function toRoman(n) {
   const map = [[10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
   if (n >= 40) return String(n);
@@ -99,6 +101,15 @@ function toRoman(n) {
   return out;
 }
 function fmtTime(s) { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+function capsule(x1, y1, r1, x2, y2, r2) {
+  const a = Math.atan2(y2 - y1, x2 - x1);
+  ctx.beginPath();
+  ctx.arc(x1, y1, r1, a + Math.PI / 2, a - Math.PI / 2);
+  ctx.arc(x2, y2, r2, a - Math.PI / 2, a + Math.PI / 2);
+  ctx.closePath();
+  ctx.fill();
+}
 
 // ---------- Input (buffered so presses during hit-stop aren't lost) ----------
 const keys = {};
@@ -189,9 +200,17 @@ const sfx = {
   dodge: () => noise(0.2, 0.08, 1200, 'bandpass'),
   throw: () => noise(0.1, 0.07, 3000, 'highpass'),
   parry: () => { tone(1200, 0.15, 'square', 0.05, 0.9); tone(1800, 0.12, 'triangle', 0.05, 0.9); },
+  block: () => { tone(1500, 0.08, 'square', 0.05, 0.7); noise(0.06, 0.12, 4000, 'highpass'); },
+  slam: () => { tone(55, 0.35, 'sine', 0.3, 0.5); noise(0.25, 0.3, 400); },
   tick: () => tone(700 + Math.random() * 300, 0.02, 'square', 0.012),
   stab: () => { noise(0.5, 0.45, 700); tone(55, 1.4, 'sine', 0.3, 0.3); },
   start: () => tone(220, 0.8, 'sine', 0.12, 2),
+  sting: () => { tone(1200, 0.9, 'sine', 0.07, 0.25); tone(600, 0.9, 'triangle', 0.05, 0.3); noise(0.4, 0.06, 3000, 'highpass'); },
+  cut: () => noise(0.05, 0.04, 4000, 'highpass'),
+  thud: () => { tone(70, 0.4, 'sine', 0.25, 0.5); noise(0.2, 0.2, 300); },
+  rope: () => noise(0.35, 0.1, 1500, 'bandpass'),
+  rumble: () => tone(45, 1.8, 'sine', 0.3, 0.8),
+  chains: () => { for (let i = 0; i < 4; i++) setTimeout(() => { tone(1800 + Math.random() * 600, 0.06, 'square', 0.03, 0.8); noise(0.05, 0.06, 5000, 'highpass'); }, i * 90); },
 };
 function toggleMute() {
   muted = !muted;
@@ -208,45 +227,47 @@ const ZONES = [
   { x: 5400, name: 'IV. THE TOWER', sub: 'she is waiting' },
 ];
 
-// Each encounter locks the screen until every wave is beaten
+// Each encounter locks the screen until every wave is beaten.
+// Some end with a cutscene where someone tries to warn Oranus.
 const ENCOUNTERS = [
-  { x: 650, waves: [['grunt', 'grunt']] },
-  { x: 1350, waves: [['grunt', 'grunt', 'grunt']] },
-  { x: 2150, waves: [['grunt', 'thrower'], ['grunt', 'grunt']] },
-  { x: 2850, waves: [['brute', 'grunt']] },
-  { x: 3350, waves: [['thrower', 'grunt', 'grunt'], ['thrower', 'grunt']] },
-  { x: 3950, waves: [['brute', 'grunt', 'grunt']] },
-  { x: 4650, waves: [['brute', 'thrower'], ['brute', 'grunt']] },
-  { x: 5150, waves: [['grunt', 'grunt', 'thrower', 'thrower']] },
-  { x: 5850, waves: [['brute', 'grunt', 'thrower'], ['grunt', 'grunt', 'thrower']] },
+  { x: 650,  waves: [['grunt', 'grunt', 'grunt']] },
+  { x: 1350, waves: [['grunt', 'thrower', 'grunt'], ['grunt', 'grunt']], scene: 'henchman' },
+  { x: 2150, waves: [['guard', 'grunt', 'thrower'], ['grunt', 'grunt', 'grunt']] },
+  { x: 2850, waves: [['brute', 'grunt', 'grunt']] },
+  { x: 3350, waves: [['guard', 'thrower', 'thrower'], ['brute', 'grunt']], scene: 'oracle' },
+  { x: 3950, waves: [['brute', 'guard', 'grunt']] },
+  { x: 4650, waves: [['brute', 'thrower', 'thrower'], ['guard', 'guard', 'grunt']] },
+  { x: 5150, waves: [['brute', 'brute', 'thrower']], scene: 'ghost' },
+  { x: 5850, waves: [['guard', 'guard', 'thrower', 'thrower'], ['brute', 'grunt', 'grunt', 'grunt']] },
   { x: 6600, waves: [['warden']] },
 ];
 
 const TYPES = {
-  grunt:   { hp: 40,  dmg: 8,  speed: 125, range: 58, windup: 0.42, recover: 0.5, cd: [1.0, 1.8], w: 34, h: 96,  kbRes: 1,    armor: false, look: 'grunt' },
-  brute:   { hp: 130, dmg: 18, speed: 75,  range: 80, windup: 0.75, recover: 0.8, cd: [1.6, 2.4], w: 54, h: 124, kbRes: 0.4,  armor: true,  look: 'brute' },
-  thrower: { hp: 30,  dmg: 7,  speed: 140, range: 0,  windup: 0.45, recover: 0.4, cd: [1.6, 2.4], w: 30, h: 92,  kbRes: 1,    armor: false, look: 'thrower', ranged: true },
-  warden:  { hp: 420, dmg: 22, speed: 135, range: 95, windup: 0.7,  recover: 0.7, cd: [1.0, 1.6], w: 64, h: 150, kbRes: 0.25, armor: true,  look: 'warden', boss: true },
+  grunt:   { hp: 60,  dmg: 11, speed: 160, range: 74,  windup: 0.36, recover: 0.42, cd: [0.6, 1.2], w: 40, h: 140, kbRes: 1,    look: 'grunt' },
+  thrower: { hp: 40,  dmg: 10, speed: 170, range: 0,   windup: 0.38, recover: 0.4,  cd: [1.1, 1.9], w: 36, h: 136, kbRes: 1,    look: 'thrower', ranged: true },
+  guard:   { hp: 95,  dmg: 14, speed: 130, range: 78,  windup: 0.44, recover: 0.5,  cd: [0.9, 1.5], w: 50, h: 146, kbRes: 0.6,  look: 'guard', shield: true },
+  brute:   { hp: 190, dmg: 24, speed: 95,  range: 102, windup: 0.68, recover: 0.7,  cd: [1.3, 2.1], w: 64, h: 178, kbRes: 0.35, look: 'brute', armor: true },
+  warden:  { hp: 600, dmg: 24, speed: 160, range: 122, windup: 0.6,  recover: 0.55, cd: [0.6, 1.1], w: 80, h: 210, kbRes: 0.2,  look: 'warden', armor: true, boss: true },
 };
 
 // Light combo: punch, punch, kick. Heavy: overhead smash that staggers anything.
 const ATK = {
   light: [
-    { dur: 0.26, active: [0.07, 0.15], reach: 74, mult: 1.0, kb: 170 },
-    { dur: 0.26, active: [0.07, 0.15], reach: 74, mult: 1.1, kb: 170 },
-    { dur: 0.4,  active: [0.12, 0.22], reach: 88, mult: 1.7, kb: 420, stagger: true },
+    { dur: 0.26, active: [0.07, 0.15], reach: 92,  mult: 1.0, kb: 170 },
+    { dur: 0.26, active: [0.07, 0.15], reach: 92,  mult: 1.1, kb: 170 },
+    { dur: 0.4,  active: [0.12, 0.22], reach: 108, mult: 1.7, kb: 420, stagger: true },
   ],
-  heavy: { dur: 0.62, active: [0.32, 0.42], reach: 98, mult: 2.4, kb: 540, stagger: true },
+  heavy: { dur: 0.62, active: [0.32, 0.42], reach: 118, mult: 2.4, kb: 540, stagger: true },
 };
 
 const TAUNTS = {
   any: [
     'Turn back, Oranus.', "She's not who you think.", 'Who do you think pays us?',
     'Go home, lover boy.', "She said you'd come.", 'Nothing personal. Strictly business.',
-    "You really don't get it, do you?",
+    "You really don't get it, do you?", 'Surround him!',
   ],
   after: [
-    'Back again? You look smaller.', 'Weren\'t you taller last time?', 'Every time you rise, you shrink.',
+    'Back again? You look smaller.', "Weren't you taller last time?", 'Every time you rise, you shrink.',
     "Keep dying. She'd like that.", "Immortal? You're barely breathing.", 'Same guy. Less of him.',
   ],
 };
@@ -273,33 +294,35 @@ const game = {
   state: 'title', t: 0, deaths: 0, kills: 0, time: 0,
   hitstop: 0, shake: 0, flash: 0, invert: 0, slowmo: 0, dieT: 0,
   zoneIdx: -1, banner: null, goArrow: 0, arena: null, wave: 0, encounters: [],
-  intro: null, dead: null, cut: null, final: null,
+  intro: null, dead: null, final: null, lastKilled: null,
 };
-let player, enemies, projectiles, particles, rings, texts, splats, camX = 0, mantis, bossRef;
+const cine = { name: null, shots: [], i: 0, t: 0, chars: 0, text: '', lines: [], cam: 0 };
+let player, enemies, projectiles, particles, rings, texts, splats, props, camX = 0, mantis, bossRef;
 
 function makePlayer() {
   return {
     x: 120, y: GROUND, vx: 0, vy: 0, face: 1, onGround: true,
     maxHp: BASE_HP, hp: BASE_HP, dmg: BASE_DMG,
-    state: 'idle', t: 0, combo: 0, comboQueued: false, hitSet: new Set(), inv: 0, dodgeCd: 0,
+    state: 'idle', t: 0, combo: 0, comboQueued: false, hitSet: new Set(), inv: 0, dodgeCd: 0, perfect: false,
   };
 }
 function makeEnemy(type, x) {
   const T = TYPES[type];
   return {
-    type, T, x, y: GROUND, vx: 0, vy: 0, kbv: 0, face: -1, hp: T.hp,
-    state: 'approach', t: 0, cd: rand(0.4, 1.2), flash: 0, dead: false, deadT: 0,
-    kind: null, hitDone: false, stagger: 0, entering: true, say: null, seed: Math.random() * 10,
+    type, T, x, y: GROUND, vx: 0, vy: 0, kbv: 0, face: -1, side: 1, hp: T.hp,
+    state: 'approach', t: 0, cd: rand(0.3, 0.9), flash: 0, dead: false, deadT: 0,
+    kind: null, wind: 0, hitsLeft: 1, hitDone: false, stagger: 0, entering: true, say: null,
+    phase2: false, seed: Math.random() * 10,
   };
 }
 function resetGame() {
   player = makePlayer();
-  enemies = []; projectiles = []; particles = []; rings = []; texts = []; splats = [];
+  enemies = []; projectiles = []; particles = []; rings = []; texts = []; splats = []; props = [];
   camX = 0; bossRef = null;
   mantis = { state: 'bound', t: 0, x: MANTIS_X, say: null, lunge: 0 };
   Object.assign(game, {
     deaths: 0, kills: 0, time: 0, hitstop: 0, slowmo: 0, dieT: 0, zoneIdx: -1, banner: null,
-    goArrow: 0, arena: null, wave: 0, cut: null, final: null,
+    goArrow: 0, arena: null, wave: 0, final: null, lastKilled: null,
     encounters: ENCOUNTERS.map(e => ({ ...e, done: false })),
   });
 }
@@ -337,8 +360,13 @@ function updateEffects(dt) {
 // =====================================================================
 //  Player
 // =====================================================================
+// Shared by Oranus and the enemies, so nobody can stand somewhere the other can't reach
+function arenaBounds() {
+  const a = game.arena;
+  return [a.left + 20, Math.min(a.left + VW - 20, MANTIS_X - 80)];
+}
 function playerBounds() {
-  if (game.arena) return [game.arena.left + 20, Math.min(game.arena.left + VW - 20, MANTIS_X - 80)];
+  if (game.arena) return arenaBounds();
   return [20, MANTIS_X - 80];
 }
 
@@ -391,15 +419,15 @@ function updatePlayer(dt) {
   } else if (p.state === 'hurt') {
     p.t += dt;
     p.vx *= Math.exp(-8 * dt);
-    if (p.t >= 0.28) p.state = 'idle';
+    if (p.t >= 0.32) p.state = 'idle';
   } else {
-    p.vx = move * 280;
+    p.vx = move * 290;
     if (move) p.face = move;
-    if (consume('jump') && p.onGround) { p.vy = -820; p.onGround = false; sfx.jump(); }
+    if (consume('jump') && p.onGround) { p.vy = -900; p.onGround = false; sfx.jump(); }
     if (consume('light')) startAttack('light');
     else if (consume('heavy')) startAttack('heavy');
     else if (p.dodgeCd <= 0 && consume('dodge')) {
-      p.state = 'dodge'; p.t = 0; p.inv = Math.max(p.inv, 0.36); p.dodgeCd = 0.65;
+      p.state = 'dodge'; p.t = 0; p.inv = Math.max(p.inv, 0.3); p.dodgeCd = 0.75; p.perfect = false;
       if (move) p.face = move;
       sfx.dodge();
     }
@@ -410,7 +438,7 @@ function updatePlayer(dt) {
 function playerHit(a) {
   const p = player;
   const x0 = p.face > 0 ? p.x + 6 : p.x - 6 - a.reach, x1 = x0 + a.reach;
-  const y0 = p.y - 105, y1 = p.y - 5;
+  const y0 = p.y - 140, y1 = p.y - 5;
   for (const e of enemies) {
     if (e.dead || p.hitSet.has(e)) continue;
     const ex0 = e.x - e.T.w / 2, ex1 = e.x + e.T.w / 2, ey0 = e.y - e.T.h;
@@ -420,7 +448,8 @@ function playerHit(a) {
   }
   // Knives can be knocked out of the air
   for (const k of projectiles) {
-    if (!k.dead && k.x > x0 - 10 && k.x < x1 + 10 && k.y > y0 && k.y < y1) {
+    if (k.type === 'wave' || k.dead) continue;
+    if (k.x > x0 - 10 && k.x < x1 + 10 && k.y > y0 && k.y < y1) {
       k.dead = true;
       popText(k.x, k.y - 20, 'PARRY');
       sfx.parry();
@@ -430,19 +459,46 @@ function playerHit(a) {
 }
 
 function damageEnemy(e, dmg, a) {
+  const dir = Math.sign(e.x - player.x) || player.face;
+  // Guards block light hits from the front; heavy hits and the combo kick break through
+  if (e.T.shield && !a.stagger && e.state !== 'hurt' && e.state !== 'attack' && Math.sign(player.x - e.x) === e.face) {
+    popText(e.x, e.y - e.T.h - 10, 'BLOCK');
+    burst(e.x + e.face * 24, e.y - 90, 6, 240);
+    sfx.block();
+    player.vx = -player.face * 240;
+    game.hitstop = 0.04;
+    e.flash = 0.06;
+    return;
+  }
   e.hp -= dmg;
   e.flash = 0.12;
   game.hitstop = a.stagger ? 0.09 : 0.05;
   game.shake = Math.max(game.shake, a.stagger ? 9 : 4);
-  const dir = Math.sign(e.x - player.x) || player.face;
   e.kbv = dir * a.kb * e.T.kbRes;
   popText(e.x, e.y - e.T.h - 12, dmg < 10 ? dmg.toFixed(1) : String(Math.round(dmg)));
   burst(e.x - dir * 10, e.y - e.T.h * 0.6, a.stagger ? 14 : 8);
   sfx.hit(a.stagger);
   if (e.hp <= 0) { killEnemy(e, dir); return; }
+  if (e.T.boss && !e.phase2 && e.hp < e.T.hp / 2) {
+    e.phase2 = true;
+    say(e, 'Enough games.', 2.5);
+    game.shake = 12;
+    summonAdds();
+  }
   if (!e.T.armor || a.stagger) {
+    if (e.T.shield && a.stagger) popText(e.x, e.y - e.T.h - 34, 'BREAK', true);
     e.state = 'hurt'; e.t = 0;
-    e.stagger = e.T.boss ? 0.25 : a.stagger ? 0.45 : 0.28;
+    e.stagger = e.T.boss ? 0.25 : e.T.shield && a.stagger ? 0.8 : a.stagger ? 0.45 : 0.26;
+  }
+}
+
+function summonAdds() {
+  const a = game.arena;
+  if (!a) return;
+  for (const d of [-1, 1]) {
+    const g = makeEnemy('grunt', d < 0 ? a.left - 40 : a.left + VW + 40);
+    g.side = d; g.face = -d;
+    enemies.push(g);
   }
 }
 
@@ -450,6 +506,7 @@ function killEnemy(e, dir) {
   e.dead = true; e.deadT = 0; e.say = null;
   e.kbv = dir * 380; e.vy = -320;
   game.kills++;
+  game.lastKilled = e;
   splats.push(makeSplat(e.x + dir * 30));
   if (e === bossRef) {
     bossRef = null;
@@ -459,17 +516,32 @@ function killEnemy(e, dir) {
   }
 }
 
-function hurtPlayer(dmg, dir) {
+// Returns true when the hit actually landed
+function hurtPlayer(dmg, dir, src) {
   const p = player;
-  if (p.inv > 0 || p.state === 'dying' || game.state !== 'play') return;
+  if (p.state === 'dying' || game.state !== 'play') return false;
+  // Dodging right as an attack lands is a perfect dodge: slow-mo and the attacker is stunned
+  if (p.state === 'dodge' && p.t < 0.22) {
+    if (!p.perfect) {
+      p.perfect = true;
+      game.slowmo = Math.max(game.slowmo, 0.6);
+      popText(p.x, p.y - 160, 'PERFECT', true);
+      ring(p.x, p.y - 70);
+      sfx.parry();
+      if (src && !src.dead) { src.state = 'hurt'; src.t = 0; src.stagger = 0.8; }
+    }
+    return false;
+  }
+  if (p.inv > 0) return false;
   p.hp -= dmg;
-  p.state = 'hurt'; p.t = 0; p.vx = dir * 300; p.inv = 0.7;
+  p.state = 'hurt'; p.t = 0; p.vx = dir * 320; p.inv = 0.45;
   game.shake = Math.max(game.shake, 8);
   game.flash = 0.25;
   sfx.hurt();
-  popText(p.x, p.y - 118, '-' + Math.round(dmg), true);
-  burst(p.x, p.y - 60, 10);
+  popText(p.x, p.y - 158, '-' + Math.round(dmg), true);
+  burst(p.x, p.y - 80, 10);
   if (p.hp <= 0) { p.hp = 0; die(); }
+  return true;
 }
 
 function die() {
@@ -487,7 +559,7 @@ function enterDeathScreen() {
   game.dead = {
     t: 0, n: game.deaths + 1, line: pick(DEATH_LINES),
     from: { hp: p.maxHp, dmg: p.dmg },
-    to: { hp: Math.max(5, p.maxHp * DECAY), dmg: Math.max(1, p.dmg * DECAY) },
+    to: { hp: Math.max(MIN_HP, p.maxHp * DECAY), dmg: Math.max(MIN_DMG, p.dmg * DECAY) },
   };
 }
 
@@ -498,13 +570,13 @@ function rise() {
   p.state = 'idle'; p.t = 0; p.inv = 2; p.vx = 0;
   game.state = 'play';
   sfx.rise();
-  ring(p.x, p.y - 50);
-  popText(p.x, p.y - 125, 'RISE', true);
+  ring(p.x, p.y - 70);
+  popText(p.x, p.y - 165, 'RISE', true);
   // Rising knocks nearby enemies away so you aren't instantly killed again
   for (const e of enemies) {
     if (e.dead) continue;
     const dx = e.x - p.x;
-    if (Math.abs(dx) < 320) { e.kbv = (Math.sign(dx) || 1) * 520; e.state = 'hurt'; e.t = 0; e.stagger = 0.9; }
+    if (Math.abs(dx) < 340) { e.kbv = (Math.sign(dx) || 1) * 540; e.state = 'hurt'; e.t = 0; e.stagger = 0.9; }
   }
 }
 
@@ -515,9 +587,25 @@ function attackers() {
   return enemies.filter(e => !e.dead && !e.T.boss && !e.T.ranged && (e.state === 'windup' || e.state === 'attack')).length;
 }
 
+function startWindup(e, kind, wind) { e.state = 'windup'; e.t = 0; e.kind = kind; e.wind = wind; }
+
 function throwKnife(e) {
-  projectiles.push({ x: e.x + e.face * 20, y: e.y - 64, vx: e.face * 430, dmg: e.T.dmg, life: 3, rot: 0 });
+  projectiles.push({ type: 'knife', x: e.x + e.face * 22, y: e.y - 96, vx: e.face * 520, dmg: e.T.dmg, life: 3, rot: 0 });
   sfx.throw();
+}
+
+function meleeStrike(e, dist) {
+  const p = player, T = e.T;
+  const inFront = Math.sign(p.x - e.x) === e.face || dist < 24;
+  const mult = T.boss && e.kind === 'melee' ? 0.6 : 1;
+  if (inFront && dist <= T.range + 22 && p.y > GROUND - 80) hurtPlayer(T.dmg * mult, e.face, e);
+  if (e.kind === 'slam') {
+    // Ground shockwaves roll out both ways: jump or roll over them
+    game.shake = Math.max(game.shake, 9);
+    for (const d of [-1, 1]) projectiles.push({ type: 'wave', x: e.x + d * 30, dir: d, life: 0.6, dmg: Math.round(T.dmg * 0.55), hit: false });
+    burst(e.x + e.face * 40, GROUND - 4, 10, 300);
+    sfx.slam();
+  }
 }
 
 function updateEnemy(e, dt) {
@@ -533,29 +621,45 @@ function updateEnemy(e, dt) {
   const p = player, T = e.T;
   const dx = p.x - e.x, dist = Math.abs(dx), dir = Math.sign(dx) || 1;
   const playerDown = p.state === 'dying' || game.state !== 'play';
+  const haste = e.phase2 ? 0.8 : 1;
   e.cd -= dt;
   e.t += dt;
   let vx = 0;
 
   switch (e.state) {
-    case 'approach':
+    case 'approach': {
       e.face = dir;
       if (playerDown) break;
       if (e.entering) { vx = dir * T.speed; break; }
       if (T.ranged) {
-        if (dist < 230) vx = -dir * T.speed;
-        else if (dist > 380) vx = dir * T.speed;
-        if (e.cd <= 0 && dist < 560) { e.state = 'windup'; e.t = 0; e.kind = 'throw'; }
-      } else {
-        if (T.boss && e.cd <= 0 && dist > 220 && dist < 520) { e.state = 'windup'; e.t = 0; e.kind = 'dash'; break; }
-        if (dist > T.range) vx = dir * T.speed;
-        if (dist <= T.range + 12 && e.cd <= 0 && (T.boss || attackers() < MAX_ATTACKERS)) {
-          e.state = 'windup'; e.t = 0; e.kind = 'melee';
+        if (dist < 260) vx = -dir * T.speed;
+        else if (dist > 420) vx = dir * T.speed;
+        if (e.cd <= 0 && dist < 600) { e.hitsLeft = Math.random() < 0.35 ? 2 : 1; startWindup(e, 'throw', T.windup); }
+        break;
+      }
+      // Each melee enemy holds a slot on one side of the player, so groups surround you
+      let slot = p.x + e.side * T.range * 0.85;
+      if (game.arena) {
+        const [lo, hi] = arenaBounds();
+        if (slot < lo + 10 || slot > hi - 10) slot = p.x - e.side * T.range * 0.85;
+      }
+      const toSlot = slot - e.x;
+      if (Math.abs(toSlot) > 12) vx = Math.sign(toSlot) * T.speed * (e.phase2 ? 1.25 : 1);
+      if (T.boss && e.cd <= 0 && dist > 240 && dist < 560) { startWindup(e, 'dash', 0.5 * haste); break; }
+      if (dist <= T.range + 14 && e.cd <= 0 && (T.boss || attackers() < MAX_ATTACKERS)) {
+        if (T.boss) {
+          const slam = Math.random() < 0.4;
+          e.hitsLeft = slam ? 1 : 3;
+          startWindup(e, slam ? 'slam' : 'melee', (slam ? T.windup * 1.2 : 0.32) * haste);
+        } else {
+          e.hitsLeft = e.type === 'grunt' && Math.random() < 0.5 ? 2 : 1;
+          startWindup(e, e.type === 'brute' ? 'slam' : 'melee', T.windup);
         }
       }
       break;
+    }
     case 'windup':
-      if (e.t >= (e.kind === 'dash' ? 0.55 : T.windup)) {
+      if (e.t >= e.wind) {
         e.state = 'attack'; e.t = 0; e.hitDone = false;
         if (e.kind === 'throw') throwKnife(e);
         else sfx.swing(T.boss || e.type === 'brute');
@@ -563,34 +667,33 @@ function updateEnemy(e, dt) {
       break;
     case 'attack':
       if (e.kind === 'dash') {
-        vx = e.face * 640;
-        if (!e.hitDone && Math.abs(p.x - e.x) < 52 && p.y > GROUND - 90) { e.hitDone = true; hurtPlayer(T.dmg * 0.8, e.face); }
+        vx = e.face * 680;
+        if (!e.hitDone && Math.abs(p.x - e.x) < 56 && p.y > GROUND - 90 && hurtPlayer(T.dmg * 0.8, e.face, e)) e.hitDone = true;
         if (e.t >= 0.45) { e.state = 'recover'; e.t = 0; }
-      } else if (e.kind === 'melee') {
-        if (!e.hitDone) {
-          e.hitDone = true;
-          const inFront = Math.sign(p.x - e.x) === e.face || dist < 20;
-          if (inFront && dist <= T.range + 20 && p.y > GROUND - 70) hurtPlayer(T.dmg, e.face);
-          if (e.type !== 'grunt') game.shake = Math.max(game.shake, 6);
-        }
-        if (e.t >= 0.18) { e.state = 'recover'; e.t = 0; }
-      } else if (e.t >= 0.2) { e.state = 'recover'; e.t = 0; }
+        break;
+      }
+      if (e.kind !== 'throw' && !e.hitDone) { e.hitDone = true; meleeStrike(e, dist); }
+      if (e.t >= 0.18) {
+        if (e.hitsLeft > 1) { e.hitsLeft--; startWindup(e, e.kind, (e.kind === 'throw' ? 0.24 : 0.2) * haste); }
+        else { e.state = 'recover'; e.t = 0; }
+      }
       break;
     case 'recover':
-      if (e.t >= T.recover) { e.state = 'approach'; e.t = 0; e.cd = rand(...T.cd); }
+      if (e.t >= T.recover * haste) { e.state = 'approach'; e.t = 0; e.cd = rand(...T.cd) * haste; }
       break;
     case 'hurt':
-      if (e.t >= e.stagger) { e.state = 'approach'; e.t = 0; e.cd = Math.max(e.cd, 0.3); }
+      if (e.t >= e.stagger) { e.state = 'approach'; e.t = 0; e.cd = Math.max(e.cd, 0.25); }
       break;
   }
 
   e.kbv *= Math.exp(-7 * dt);
   e.vx = vx;
   e.x += (vx + e.kbv) * dt;
-  const a = game.arena;
-  if (a) {
+  if (game.arena) {
+    // Once an enemy has walked on screen it joins the fight and stays inside the arena
+    const a = game.arena, [lo, hi] = arenaBounds();
     if (e.entering && e.x > a.left + 30 && e.x < a.left + VW - 30) e.entering = false;
-    if (!e.entering) e.x = clamp(e.x, a.left + 20, a.left + VW - 20);
+    if (!e.entering) e.x = clamp(e.x, lo, hi);
   }
 }
 
@@ -612,11 +715,13 @@ function separate() {
 function updateProjectiles(dt) {
   const p = player;
   for (const k of projectiles) {
-    k.x += k.vx * dt; k.life -= dt; k.rot += dt * 22;
-    if (!k.dead && Math.abs(k.x - p.x) < 18 && k.y > p.y - 95 && k.y < p.y - 5 && p.inv <= 0 && p.state !== 'dying') {
-      k.dead = true;
-      hurtPlayer(k.dmg, Math.sign(k.vx));
+    if (k.type === 'wave') {
+      k.x += k.dir * 560 * dt; k.life -= dt;
+      if (!k.hit && Math.abs(k.x - p.x) < 24 && p.y > GROUND - 28 && hurtPlayer(k.dmg, k.dir, null)) k.hit = true;
+      continue;
     }
+    k.x += k.vx * dt; k.life -= dt; k.rot += dt * 22;
+    if (!k.dead && Math.abs(k.x - p.x) < 20 && k.y > p.y - 138 && k.y < p.y - 4 && hurtPlayer(k.dmg, Math.sign(k.vx), null)) k.dead = true;
   }
   projectiles = projectiles.filter(k => !k.dead && k.life > 0);
 }
@@ -638,6 +743,7 @@ function spawnWave(list) {
     const x = side < 0 ? a.left - 40 - i * 40 : a.left + VW + 40 + i * 40;
     const e = makeEnemy(type, x);
     e.face = -side;
+    e.side = side;
     enemies.push(e);
     side *= -1;
   });
@@ -667,7 +773,8 @@ function updateEncounters() {
   } else {
     enc.done = true;
     game.arena = null;
-    game.goArrow = 3;
+    if (enc.scene) playScene(enc.scene);
+    else game.goArrow = 3;
   }
 }
 
@@ -682,99 +789,9 @@ function updateZones() {
 
 function updateCamera(dt) {
   let target;
-  if (game.state === 'cutscene') target = MANTIS_X - VW * 0.62;
-  else if (game.arena) target = game.arena.left;
+  if (game.arena) target = game.arena.left;
   else target = clamp(player.x - VW * 0.38, 0, LEVEL_END - VW);
   camX = lerp(camX, target, 1 - Math.exp(-dt * 5));
-}
-
-// =====================================================================
-//  Ending
-// =====================================================================
-function endingScript() {
-  const d = game.deaths, p = player;
-  return [
-    { who: 'ORANUS', text: "Mantis! I'm here. It's over." },
-    { who: 'MANTIS', text: '...You came.' },
-    { who: 'MANTIS', text: d === 0 ? 'Not a single death? How disappointing.' : `Of course you came. ${d} ${d === 1 ? 'death' : 'deaths'}, and you still came.` },
-    { who: 'ORANUS', text: "Let's go home." },
-    { who: 'MANTIS', text: 'Home?', do: () => { mantis.state = 'stand'; mantis.t = 0; burst(MANTIS_X, GROUND - 50, 12, 200); } },
-    { who: 'MANTIS', text: 'Oranus... who do you think hired them?' },
-    { who: 'ORANUS', text: '...What?' },
-    { who: 'MANTIS', text: "You can't be killed. Believe me, I tried." },
-    {
-      who: 'MANTIS', text: d === 0
-        ? 'So I sent an army to wear you down. You were supposed to break.'
-        : 'So I let them kill you. Again. And again. And every time, you came back a little weaker.',
-    },
-    {
-      who: 'MANTIS', text: d === 0
-        ? "Doesn't matter. I'll do it myself."
-        : `Look at you. ${Math.ceil(p.maxHp)} HP. ${p.dmg.toFixed(1)} damage. Barely a man.`,
-    },
-    { who: 'MANTIS', text: 'Did you know, darling? The female praying mantis... eats her mate.', do: () => { mantis.state = 'pray'; mantis.t = 0; } },
-    { who: null, text: '', auto: 1.9, do: mantisStrike },
-  ];
-}
-
-function mantisStrike() {
-  mantis.state = 'strike'; mantis.t = 0;
-  player.state = 'fallen'; player.t = 0; player.hp = 0; player.vx = -120;
-  game.invert = 0.22;
-  game.shake = 16;
-  burst(player.x, player.y - 60, 24, 520);
-  sfx.stab();
-}
-
-function startCutscene() {
-  game.state = 'cutscene';
-  game.arena = null;
-  enemies.forEach(e => (e.say = null));
-  projectiles = [];
-  Object.assign(player, { state: 'idle', t: 0, inv: 0, vy: 0 });
-  game.cut = { phase: 'walk', i: 0, t: 0, chars: 0, text: '', lines: endingScript(), bars: 0 };
-}
-
-function startLine() {
-  const c = game.cut, l = c.lines[c.i];
-  c.t = 0; c.chars = 0;
-  c.text = typeof l.text === 'function' ? l.text() : l.text;
-  l.do?.();
-}
-
-function nextLine() {
-  const c = game.cut;
-  c.i++;
-  if (c.i >= c.lines.length) { game.state = 'final'; game.final = { t: 0 }; return; }
-  startLine();
-}
-
-function updateCutscene(dt) {
-  const c = game.cut, p = player;
-  c.bars = Math.min(1, c.bars + dt * 1.5);
-  mantis.t += dt;
-  if (mantis.state === 'strike') mantis.lunge = Math.min(1, mantis.t / 0.12);
-
-  if (c.phase === 'walk') {
-    const dx = MANTIS_X - 115 - p.x;
-    p.vx = Math.abs(dx) > 4 ? Math.sign(dx) * 150 : 0;
-    p.face = p.vx < 0 ? -1 : 1;
-    p.x += p.vx * dt;
-    if (!p.vx) { p.face = 1; c.phase = 'talk'; startLine(); }
-    return;
-  }
-  if (p.state === 'fallen') { p.t += dt; p.vx *= Math.exp(-6 * dt); p.x += p.vx * dt; }
-
-  c.t += dt;
-  const line = c.lines[c.i];
-  const before = Math.floor(c.chars);
-  c.chars = Math.min(c.text.length, c.chars + dt * 40);
-  if (Math.floor(c.chars) > before && before % 2 === 0) sfx.tick();
-  if (line.auto) { if (c.t >= line.auto) nextLine(); return; }
-  if (consume('confirm') || consume('light') || consume('jump')) {
-    if (c.chars < c.text.length) c.chars = c.text.length;
-    else nextLine();
-  }
 }
 
 // =====================================================================
@@ -808,12 +825,7 @@ function update(dt) {
       updateEffects(dt);
       if (game.dead.t > 1.6 && (consume('confirm') || consume('light') || consume('jump'))) rise();
       break;
-    case 'cutscene':
-      updateCutscene(dt);
-      enemies.forEach(e => updateEnemy(e, dt));
-      updateEffects(dt);
-      updateCamera(dt);
-      break;
+    case 'cine': updateCine(dt); break;
     case 'final': {
       const f = game.final;
       f.t += dt;
@@ -841,11 +853,12 @@ function updatePlay(dt) {
   updateProjectiles(sdt);
   updateEffects(sdt);
   updateEncounters();
+  if (game.state !== 'play') return;
   updateZones();
   updateCamera(dt);
 
   if (player.state === 'dying' && (game.dieT += dt) > 1.5) enterDeathScreen();
-  if (!game.arena && game.encounters.every(e => e.done) && player.x >= MANTIS_X - 230 && player.state !== 'dying') startCutscene();
+  if (!game.arena && game.encounters.every(e => e.done) && player.x >= MANTIS_X - 230 && player.state !== 'dying') playScene('finale');
 }
 
 function updateIntro(dt) {
@@ -869,155 +882,1122 @@ function nextIntro() { Object.assign(game.intro, { i: game.intro.i + 1, t: 0, ch
 function beginPlay() { game.state = 'play'; sfx.start(); }
 
 // =====================================================================
-//  Drawing: characters
+//  Cutscenes: anime / manga style shots
 // =====================================================================
-const LOOKS = {
-  oranus:  { color: WHITE,     back: '#8f8f8f', head: WHITE,     thick: 7,  scale: 1,    scarf: true },
-  grunt:   { color: '#7f7f7f', back: '#4a4a4a', head: '#0b0b0b', thick: 7,  scale: 1,    mask: true },
-  brute:   { color: '#6b6b6b', back: '#3c3c3c', head: '#0b0b0b', thick: 10, scale: 1.28, mask: true },
-  thrower: { color: '#959595', back: '#555555', head: '#0b0b0b', thick: 6,  scale: 0.95, mask: true, hood: true },
-  warden:  { color: '#b8b8b8', back: '#666666', head: '#0b0b0b', thick: 10, scale: 1.5,  mask: true, horns: true },
-  mantis:  { color: WHITE,     back: '#9c9c9c', head: WHITE,     thick: 6,  scale: 0.95, hair: true, dress: true },
-};
+const NAME = { oranus: 'ORANUS', mantis: 'MANTIS', henchman: 'HENCHMAN', oracle: 'OLD WOMAN', ghost: 'STRANGER' };
+const L = (who, text) => ({ who: NAME[who], text });
+const WIDE = (o = {}) => ({ kind: 'wide', zoom: 0.012, ...o });
+const FACE = (who, expr, o = {}) => ({ kind: 'face', who, expr, ...o });
+const EYES = (who, expr, o = {}) => ({ kind: 'eyes', who, expr, zoom: 0.035, ...o });
+const SPLIT = (left, right, o = {}) => ({ kind: 'split', left, right, ...o });
+const IMPACT = (text, o = {}) => ({ kind: 'impact', text, dur: 0.9, zoom: 0, ...o });
 
-// Angles are measured from straight down; positive swings toward the facing direction
-function limb(x, y, a1, a2, l1, l2, face) {
-  const kx = x + Math.sin(a1) * l1 * face, ky = y + Math.cos(a1) * l1;
-  const ex = kx + Math.sin(a1 + a2) * l2 * face, ey = ky + Math.cos(a1 + a2) * l2;
-  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(kx, ky); ctx.lineTo(ex, ey); ctx.stroke();
-  return { kx, ky, ex, ey };
+function walkOn(dt) { player.face = 1; player.vx = 130; player.x = Math.min(player.x + 130 * dt, MANTIS_X - 80); }
+function walkToMantis(dt) {
+  const p = player, dx = MANTIS_X - 125 - p.x;
+  p.vx = Math.abs(dx) > 4 ? Math.sign(dx) * 160 : 0;
+  p.face = p.vx < 0 ? -1 : 1;
+  p.x += p.vx * dt;
 }
 
-function clawSpikes(seg) {
-  // Little barbs along the forearm, like a mantis' front legs
-  ctx.save();
-  ctx.lineWidth = 3;
-  const ang = Math.atan2(seg.ey - seg.ky, seg.ex - seg.kx);
-  for (let i = 1; i <= 4; i++) {
-    const t = i / 5;
-    const x = lerp(seg.kx, seg.ex, t), y = lerp(seg.ky, seg.ey, t);
-    const a = ang + Math.PI / 2;
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * 10, y + Math.sin(a) * 10); ctx.stroke();
+const SCENES = {
+  henchman: () => [
+    WIDE({ dur: 2.4 }),
+    FACE('henchman', 'dying', { bg: 'rain', line: L('henchman', 'Heh... you really came all this way for her?') }),
+    FACE('oranus', 'determined', { side: 'right', line: L('oranus', 'Where is she?') }),
+    FACE('henchman', 'pained', { side: 'left', bg: 'rain', line: L('henchman', 'The tower. But listen to me, boy...') }),
+    EYES('henchman', 'pained', { bg: 'focus', sfx: 'sting', line: L('henchman', "She's not what you think she is.") }),
+    FACE('oranus', 'angry', { bg: 'speed', shake: 8, line: L('oranus', 'Liar!') }),
+    FACE('henchman', 'dying', { bg: 'rain', close: true, line: L('henchman', 'Ask her... who pays us...') }),
+    WIDE({ dur: 2.6, enter: () => { const h = props.find(p => p.kind === 'henchman'); if (h) h.dead = true; sfx.thud(); } }),
+  ],
+
+  oracle: () => [
+    WIDE({ line: L('oracle', 'Boy. The one with the scarf.') }),
+    FACE('oranus', 'neutral', { side: 'right', line: L('oranus', "I don't have time, old woman.") }),
+    FACE('oracle', 'wise', { side: 'left', line: L('oracle', 'I read her palm once.') }),
+    EYES('oracle', 'reveal', { bg: 'focus', sfx: 'sting', line: L('oracle', 'Three husbands before you.') }),
+    FACE('oracle', 'wise', { bg: 'rain', line: L('oracle', 'All of them immortal. All of them gone.') }),
+    FACE('oranus', 'shock', { bg: 'focus', shake: 6, line: L('oranus', '...Three?') }),
+    FACE('oracle', 'knowing', { side: 'left', line: L('oracle', 'The mantis loves her mate too. Right up until she gets hungry.') }),
+    FACE('oranus', 'determined', { bg: 'speed', side: 'right', line: L('oranus', "You're wrong about her.") }),
+    WIDE({ dur: 2.8, update: walkOn, line: L('oracle', 'They never listen.') }),
+  ],
+
+  ghost: () => {
+    const d = game.deaths;
+    return [
+      WIDE({ dur: 2.6, enter: () => sfx.chains() }),
+      FACE('ghost', 'empty', { bg: 'rain', line: L('ghost', 'Another one... Let me guess. She was taken.') }),
+      FACE('oranus', 'determined', { side: 'right', line: L('oranus', 'Who are you?') }),
+      FACE('ghost', 'sad', { side: 'left', bg: 'rain', line: L('ghost', "Her last husband. I couldn't die either.") }),
+      FACE('ghost', 'empty', { line: L('ghost', d > 0
+        ? "I came back eleven times. Each time, a little less of me. You've already started. I can see it."
+        : 'I came back eleven times. Each time, a little less of me.') }),
+      EYES('ghost', 'desperate', { bg: 'focus', shake: 6, sfx: 'sting', line: L('ghost', "Turn around! While there's still something left of you!") }),
+      SPLIT({ who: 'oranus', expr: 'pained' }, { who: 'ghost', expr: 'empty', bg: 'rain' }, { line: L('oranus', '...I have to hear it from her.') }),
+      FACE('ghost', 'sad', { bg: 'rain', close: true, line: L('ghost', "Then you're already gone.") }),
+      WIDE({ dur: 2.6, update: walkOn }),
+    ];
+  },
+
+  finale: () => {
+    const d = game.deaths, p = player;
+    return [
+      WIDE({ update: walkToMantis, until: () => player.vx === 0, dur: 1.2 }),
+      FACE('oranus', 'soft', { side: 'right', line: L('oranus', "Mantis! I'm here. It's over.") }),
+      FACE('mantis', 'downcast', { side: 'left', bg: 'rain', line: L('mantis', '...You came.') }),
+      FACE('mantis', 'soft', { line: L('mantis', d === 0 ? 'Not a single death? How... impressive.' : `Of course you came. ${d} ${d === 1 ? 'death' : 'deaths'}, and you still came.`) }),
+      FACE('oranus', 'smile', { side: 'right', line: L('oranus', "Let's go home.") }),
+      WIDE({ dur: 2.2, enter: () => { mantis.state = 'stand'; mantis.t = 0; burst(MANTIS_X, GROUND - 70, 14, 220); sfx.rope(); } }),
+      EYES('mantis', 'reveal', { bg: 'focus', sfx: 'sting', line: L('mantis', 'Home?') }),
+      FACE('mantis', 'sinister', { bg: 'dark', line: L('mantis', 'Oranus... who do you think hired them?') }),
+      FACE('oranus', 'shock', { bg: 'focus', shake: 8, line: L('oranus', '...What?') }),
+      FACE('mantis', 'sinister', { bg: 'dark', side: 'left', line: L('mantis', "You can't be killed. Believe me, I tried.") }),
+      FACE('mantis', 'reveal', { bg: 'speed', line: L('mantis', d === 0
+        ? 'So I sent an army to wear you down. You were supposed to break.'
+        : 'So I let them kill you. Again and again. And every time, you came back a little weaker.') }),
+      SPLIT({ who: 'oranus', expr: 'pained' }, { who: 'mantis', expr: 'sinister', bg: 'dark' }, { line: L('mantis', d === 0
+        ? "Doesn't matter. I'll do it myself."
+        : `Look at you. ${Math.ceil(p.maxHp)} HP. ${p.dmg.toFixed(1)} damage. Barely a man.`) }),
+      FACE('mantis', 'sinister', { bg: 'dark', scale: 1.95, zoom: 0.05, line: L('mantis', 'Did you know, darling?') }),
+      EYES('mantis', 'reveal', { bg: 'focus', shake: 4, line: L('mantis', 'The female praying mantis... eats her mate.') }),
+      WIDE({ dur: 2.0, zoom: 0.04, enter: () => { mantis.state = 'pray'; mantis.t = 0; game.shake = 6; sfx.rumble(); } }),
+      IMPACT('SHNK!!', { enter: mantisStrike }),
+      FACE('oranus', 'dying', { bg: 'flash', close: true, dur: 2.6, line: L('oranus', '...Mantis...') }),
+      WIDE({ dur: 3.4, zoom: -0.02, enter: () => { mantis.state = 'pray'; } }),
+    ];
+  },
+};
+
+// Puts the person giving the warning into the world near Oranus
+const SCENE_INIT = {
+  henchman: () => {
+    const e = game.lastKilled, x = e ? e.x : player.x + 110;
+    enemies = enemies.filter(en => en !== e);
+    const face = Math.sign(player.x - x) || -1;
+    props.push({ kind: 'henchman', x, face, dead: false });
+    player.face = -face;
+    cine.cam = clamp((player.x + x) / 2 - VW / 2, 0, LEVEL_END - VW);
+  },
+  oracle: () => {
+    const x = player.x + 230;
+    props.push({ kind: 'oracle', x, face: -1 });
+    player.face = 1;
+    cine.cam = clamp((player.x + x) / 2 - VW / 2, 0, LEVEL_END - VW);
+  },
+  ghost: () => {
+    const x = player.x + 220;
+    props.push({ kind: 'ghost', x, face: -1 });
+    player.face = 1;
+    cine.cam = clamp((player.x + x) / 2 - VW / 2, 0, LEVEL_END - VW);
+  },
+  finale: () => { cine.cam = MANTIS_X - VW * 0.62; },
+};
+
+function mantisStrike() {
+  mantis.state = 'strike'; mantis.t = 0;
+  player.state = 'fallen'; player.t = 0; player.hp = 0; player.vx = -120;
+  game.invert = 0.22;
+  game.shake = 16;
+  burst(player.x, player.y - 80, 24, 520);
+  sfx.stab();
+}
+
+function playScene(name) {
+  game.state = 'cine';
+  cine.name = name;
+  projectiles = [];
+  enemies.forEach(e => (e.say = null));
+  Object.assign(player, { state: 'idle', t: 0, vx: 0, vy: 0, y: GROUND, inv: 0 });
+  SCENE_INIT[name]?.();
+  cine.shots = SCENES[name]();
+  cine.i = 0;
+  startShot();
+}
+
+function startShot() {
+  const s = cine.shots[cine.i];
+  cine.t = 0; cine.chars = 0;
+  cine.text = s.line ? s.line.text : '';
+  ctx.font = '21px "Special Elite", monospace';
+  cine.lines = cine.text ? wrapText(cine.text, 780) : [];
+  s.enter?.();
+  if (s.sfx) sfx[s.sfx]();
+  else if (cine.i > 0) sfx.cut();
+}
+
+function nextShot() {
+  cine.i++;
+  if (cine.i >= cine.shots.length) { endScene(); return; }
+  startShot();
+}
+
+function endScene() {
+  if (cine.name === 'finale') { game.state = 'final'; game.final = { t: 0 }; return; }
+  const h = props.find(p => p.kind === 'henchman');
+  if (h) h.dead = true;
+  player.vx = 0;
+  game.state = 'play';
+  game.goArrow = 3;
+}
+
+function skipScene() {
+  if (cine.name === 'finale') {
+    if (player.state !== 'fallen') mantisStrike();
+    mantis.state = 'pray';
+    game.state = 'final'; game.final = { t: 0 };
+    return;
   }
-  // A hooked blade past the wrist
-  ctx.beginPath(); ctx.moveTo(seg.ex, seg.ey);
-  ctx.lineTo(seg.ex + Math.cos(ang) * 14, seg.ey + Math.sin(ang) * 14);
-  ctx.lineTo(seg.ex + Math.cos(ang + 2.4) * 8 + Math.cos(ang) * 14, seg.ey + Math.sin(ang + 2.4) * 8 + Math.sin(ang) * 14);
+  endScene();
+}
+
+function updateCine(dt) {
+  const s = cine.shots[cine.i];
+  cine.t += dt;
+  s.update?.(dt, cine.t);
+  mantis.t += dt;
+  if (mantis.state === 'strike') mantis.lunge = Math.min(1, mantis.t / 0.12);
+  if (player.state === 'fallen') { player.t += dt; player.vx *= Math.exp(-6 * dt); player.x += player.vx * dt; }
+  updateEffects(dt);
+  if (s.kind === 'wide') camX = lerp(camX, cine.cam, 1 - Math.exp(-dt * 4));
+
+  if (cine.text) {
+    const before = Math.floor(cine.chars);
+    cine.chars = Math.min(cine.text.length, cine.chars + dt * 34);
+    if (Math.floor(cine.chars) > before && before % 2 === 0) sfx.tick();
+  }
+  const typed = !cine.text || cine.chars >= cine.text.length;
+  const need = s.dur ?? (cine.text ? 1.5 + cine.text.length * 0.045 : 2);
+
+  if (consume('pause')) { skipScene(); return; }
+  if (consume('confirm') || consume('light') || consume('jump')) {
+    if (!typed) cine.chars = cine.text.length;
+    else if (!s.until || s.until()) nextShot();
+    return;
+  }
+  if (typed && cine.t >= need && (!s.until || s.until())) nextShot();
+}
+
+function isTalking(who) {
+  const s = cine.shots[cine.i];
+  return !!(s && s.line && s.line.who === NAME[who] && cine.chars < cine.text.length);
+}
+
+// =====================================================================
+//  Manga portraits
+// =====================================================================
+const TONE_IMG = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 6;
+  const g = c.getContext('2d'); g.fillStyle = INK;
+  g.beginPath(); g.arc(3, 3, 1.25, 0, Math.PI * 2); g.fill();
+  return c;
+})();
+let tonePat = null;
+const dots = () => (tonePat ??= ctx.createPattern(TONE_IMG, "repeat"));
+
+const EXPR = {
+  neutral:    { open: 0.95, iris: 'normal', brow: 0,     mouth: 'line' },
+  determined: { open: 0.82, iris: 'normal', brow: 0.65,  mouth: 'line' },
+  angry:      { open: 0.8,  iris: 'small',  brow: 1,     mouth: 'grit', veins: true },
+  shock:      { open: 1.15, iris: 'small',  brow: -0.9,  mouth: 'shock', sweat: true, shine: 'tiny' },
+  soft:       { open: 0.72, iris: 'normal', brow: -0.35, mouth: 'smile', blush: true },
+  smile:      { happy: true, open: 1, brow: -0.25, mouth: 'smile', blush: true },
+  sad:        { open: 0.62, iris: 'normal', brow: -0.8,  mouth: 'sad', look: 2 },
+  downcast:   { open: 0.42, iris: 'normal', brow: -0.4,  mouth: 'line', look: 5 },
+  sinister:   { open: 0.55, iris: 'slit',   brow: 0.9,   mouth: 'grin', shadow: true },
+  reveal:     { open: 1.05, iris: 'slit',   brow: 0.35,  mouth: 'smirk', shadow: true },
+  knowing:    { open: 0.58, iris: 'normal', brow: -0.1,  mouth: 'smirk' },
+  wise:       { open: 0.55, iris: 'normal', brow: -0.15, mouth: 'line' },
+  pained:     { open: 0.6,  iris: 'normal', brow: -0.7,  mouth: 'grit', sweat: true },
+  dying:      { open: 0.38, iris: 'normal', brow: -0.5,  mouth: 'open', shine: false, blood: true },
+  empty:      { open: 0.78, iris: 'normal', brow: -0.45, mouth: 'line', shine: false },
+  desperate:  { open: 1.12, iris: 'small',  brow: -1,    mouth: 'shout', sweat: true, shine: 'tiny' },
+};
+
+function facePath(jaw) {
+  ctx.beginPath();
+  ctx.moveTo(-70, -30);
+  ctx.bezierCurveTo(-72, 26, -60 * jaw, 64, -30 * jaw, 92);
+  ctx.bezierCurveTo(-17, 104, -6, 110, 0, 112);
+  ctx.bezierCurveTo(6, 110, 17, 104, 30 * jaw, 92);
+  ctx.bezierCurveTo(60 * jaw, 64, 72, 26, 70, -30);
+  ctx.bezierCurveTo(70, -112, -70, -112, -70, -30);
+  ctx.closePath();
+}
+
+function shoulderPath(fill) {
+  ctx.fillStyle = fill; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-210, 330);
+  ctx.quadraticCurveTo(-200, 178, -110, 152);
+  ctx.quadraticCurveTo(-50, 134, 0, 140);
+  ctx.quadraticCurveTo(50, 134, 110, 152);
+  ctx.quadraticCurveTo(200, 178, 210, 330);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+}
+
+// ---- Oranus ----
+function oranusHairBack() {
+  ctx.fillStyle = INK;
+  ctx.beginPath(); ctx.ellipse(0, -34, 90, 86, 0, 0, Math.PI * 2); ctx.fill();
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(s * 84, 0); ctx.lineTo(s * 106, 52); ctx.lineTo(s * 70, 36); ctx.lineTo(s * 78, 80); ctx.lineTo(s * 56, 40);
+    ctx.closePath(); ctx.fill();
+  }
+}
+function oranusCoat() {
+  shoulderPath('#161616');
+  ctx.strokeStyle = '#8a8a8a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(112, 155); ctx.quadraticCurveTo(196, 180, 204, 320); ctx.stroke();
+  ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(-64, 150); ctx.lineTo(-12, 330); ctx.moveTo(64, 150); ctx.lineTo(12, 330); ctx.stroke();
+}
+function oranusScarf() {
+  ctx.fillStyle = PAPER; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  const sw = Math.sin(game.t * 2) * 6;
+  ctx.beginPath();
+  ctx.moveTo(28, 160); ctx.quadraticCurveTo(62 + sw, 220, 52 + sw, 330); ctx.lineTo(94 + sw, 330); ctx.quadraticCurveTo(98 + sw, 220, 60, 154);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-60, 116); ctx.quadraticCurveTo(0, 150, 60, 116); ctx.lineTo(68, 150); ctx.quadraticCurveTo(0, 192, -68, 150);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(-42, 140); ctx.quadraticCurveTo(-10, 162, 22, 160); ctx.moveTo(-20, 152); ctx.quadraticCurveTo(12, 172, 46, 152);
+  ctx.moveTo(62, 200 + sw * 0.3); ctx.quadraticCurveTo(72 + sw, 250, 70 + sw, 300); ctx.stroke();
+  ctx.save(); ctx.globalAlpha = 0.4; ctx.fillStyle = dots();
+  ctx.beginPath(); ctx.moveTo(-68, 150); ctx.quadraticCurveTo(0, 192, 68, 150); ctx.lineTo(60, 168); ctx.quadraticCurveTo(0, 200, -60, 168); ctx.fill();
+  ctx.restore();
+}
+function oranusHairFront() {
+  ctx.fillStyle = INK;
+  const pts = [
+    [-86, 10], [-80, -40], [-106, -62], [-76, -78], [-92, -112], [-48, -104], [-40, -140], [-8, -112], [18, -142], [30, -110],
+    [72, -124], [66, -88], [104, -76], [80, -50], [94, -20], [84, 12], [72, -16],
+    [62, -42], [54, -16], [40, -46], [26, -12], [14, -48], [-2, -14], [-14, -48], [-30, -18], [-40, -46], [-56, -20], [-62, -44], [-74, -14],
+  ];
+  ctx.beginPath(); ctx.moveTo(...pts[0]);
+  for (const p of pts.slice(1)) ctx.lineTo(...p);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = PAPER; ctx.lineWidth = 2.2;
+  for (const [a, b, c, d] of [[-62, -84, -40, -94], [-24, -98, -2, -102], [18, -100, 40, -96], [52, -88, 68, -78]]) {
+    ctx.beginPath(); ctx.moveTo(a, b); ctx.quadraticCurveTo((a + c) / 2, b - 7, c, d); ctx.stroke();
+  }
+}
+function oranusScar() {
+  ctx.strokeStyle = INK; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-54, 30); ctx.lineTo(-40, 58);
+  ctx.moveTo(-52, 40); ctx.lineTo(-44, 37); ctx.moveTo(-48, 49); ctx.lineTo(-40, 46); ctx.stroke();
+}
+
+// ---- Mantis ----
+function mantisHairBack() {
+  ctx.fillStyle = INK;
+  const sway = Math.sin(game.t * 1.6) * 5;
+  ctx.beginPath(); ctx.moveTo(-86, -40);
+  ctx.bezierCurveTo(-112, 60, -122 + sway, 200, -142 + sway, 330);
+  ctx.lineTo(142 + sway, 330);
+  ctx.bezierCurveTo(122 + sway, 200, 112, 60, 86, -40);
+  ctx.bezierCurveTo(80, -134, -80, -134, -86, -40);
+  ctx.fill();
+}
+function mantisShoulders() {
+  ctx.fillStyle = PAPER; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-200, 330); ctx.quadraticCurveTo(-196, 196, -110, 168); ctx.quadraticCurveTo(-50, 150, 0, 152);
+  ctx.quadraticCurveTo(50, 150, 110, 168); ctx.quadraticCurveTo(196, 196, 200, 330);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.save(); ctx.clip(); ctx.globalAlpha = 0.45; ctx.fillStyle = dots(); ctx.fillRect(70, 150, 140, 200); ctx.restore();
+  ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(-62, 188); ctx.quadraticCurveTo(-34, 182, -12, 192); ctx.moveTo(62, 188); ctx.quadraticCurveTo(34, 182, 12, 192); ctx.stroke();
+  // White dress
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-170, 330); ctx.lineTo(-150, 236); ctx.quadraticCurveTo(0, 268, 150, 236); ctx.lineTo(170, 330);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.lineWidth = 1.5;
+  for (let x = -140; x < 140; x += 14) {
+    const y = 236 + 16 * (1 - (x / 150) ** 2);
+    ctx.beginPath(); ctx.arc(x + 7, y + 1, 7, 0, Math.PI); ctx.stroke();
+  }
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-104, 172); ctx.lineTo(-118, 240); ctx.moveTo(104, 172); ctx.lineTo(118, 240); ctx.stroke();
+}
+function mantisNecklace() {
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(-34, 128); ctx.quadraticCurveTo(0, 176, 34, 128); ctx.stroke();
+  ctx.fillStyle = INK;
+  ctx.beginPath(); ctx.moveTo(0, 150); ctx.lineTo(6, 160); ctx.lineTo(0, 172); ctx.lineTo(-6, 160); ctx.closePath(); ctx.fill();
+}
+function mantisHairFront() {
+  ctx.fillStyle = INK;
+  ctx.beginPath(); ctx.moveTo(-80, -26);
+  ctx.bezierCurveTo(-84, -128, 84, -128, 80, -26);
+  for (const [x, y] of [[70, -24], [62, -30], [52, -20], [42, -28], [30, -18], [18, -27], [6, -17], [-6, -27], [-18, -18], [-30, -28], [-42, -19], [-54, -29], [-64, -21], [-72, -28]]) ctx.lineTo(x, y);
+  ctx.closePath(); ctx.fill();
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(s * 80, -30); ctx.quadraticCurveTo(s * 94, 50, s * 78, 152);
+    ctx.lineTo(s * 64, 158); ctx.quadraticCurveTo(s * 74, 60, s * 62, -24);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.strokeStyle = PAPER; ctx.lineWidth = 2.2;
+  for (let i = -3; i <= 3; i++) {
+    const y = -88 + Math.abs(i) * 5;
+    ctx.beginPath(); ctx.moveTo(i * 17 - 6, y); ctx.quadraticCurveTo(i * 17, y - 4, i * 17 + 6, y); ctx.stroke();
+  }
+}
+
+// ---- Henchman, old woman, stranger ----
+const hoodBack = color => () => {
+  ctx.fillStyle = color; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-130, 330);
+  ctx.bezierCurveTo(-150, 90, -130, -150, 0, -152); ctx.bezierCurveTo(130, -150, 150, 90, 130, 330);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.ellipse(0, -4, 96, 118, 0, 0, Math.PI * 2); ctx.fill();
+};
+const hoodFront = color => () => {
+  ctx.fillStyle = color; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-100, -6);
+  ctx.bezierCurveTo(-98, -150, 98, -150, 100, -6); ctx.bezierCurveTo(70, -76, -70, -76, -100, -6);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+};
+function hoodieBody() {
+  shoulderPath('#1a1a1a');
+  ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(-24, 152); ctx.lineTo(-30, 236); ctx.moveTo(24, 152); ctx.lineTo(30, 236); ctx.stroke();
+}
+function crackedMask() {
+  ctx.save(); facePath(1.08); ctx.clip();
+  ctx.fillStyle = '#141414';
+  ctx.beginPath(); ctx.rect(-130, -150, 260, 300);
+  ctx.moveTo(-74, -34); ctx.lineTo(-18, -44); ctx.lineTo(-4, -14); ctx.lineTo(-22, 6); ctx.lineTo(-6, 30); ctx.lineTo(-36, 50); ctx.lineTo(-76, 44); ctx.closePath();
+  ctx.fill('evenodd');
+  ctx.strokeStyle = '#8a8a8a'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-4, -14); ctx.lineTo(20, -30); ctx.lineTo(34, -26);
+  ctx.moveTo(-6, 30); ctx.lineTo(18, 44); ctx.lineTo(26, 64);
+  ctx.moveTo(-18, -44); ctx.lineTo(-6, -72);
   ctx.stroke();
+  ctx.strokeStyle = PAPER; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(22, 4); ctx.lineTo(54, 0); ctx.stroke();
+  ctx.restore();
+  // Blood running from the broken edge
+  ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-40, 48); ctx.quadraticCurveTo(-36, 70, -38, 92); ctx.stroke();
+  circle(-38, 96, 3.5);
+}
+function shawlBody() {
+  shoulderPath('#262626');
+  ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = 1.5;
+  for (let x = -180; x <= 180; x += 8) { ctx.beginPath(); ctx.moveTo(x, 300 - Math.abs(x) * 0.15); ctx.lineTo(x + 2, 330); ctx.stroke(); }
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 11; i++) {
+    const a = Math.PI * (0.15 + i * 0.07);
+    ctx.fillStyle = PAPER; ctx.strokeStyle = INK;
+    ctx.beginPath(); ctx.arc(Math.cos(a) * 70, 130 + Math.sin(a) * 50, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+}
+function oracleHoodFront() {
+  hoodFront('#222')();
+  ctx.strokeStyle = '#9a9a9a'; ctx.lineWidth = 3;
+  for (const s of [-1, 1]) {
+    ctx.beginPath(); ctx.moveTo(s * 70, -26); ctx.quadraticCurveTo(s * 84, 10, s * 74, 44); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(s * 62, -30); ctx.quadraticCurveTo(s * 74, 0, s * 70, 30); ctx.stroke();
+  }
+}
+function wrinkles() {
+  ctx.strokeStyle = 'rgba(10,10,10,.75)'; ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  for (const s of [-1, 1]) for (let i = 0; i < 3; i++) { ctx.moveTo(s * 58, 4 + i * 6); ctx.lineTo(s * 70, i * 8); }
+  ctx.moveTo(-16, 46); ctx.quadraticCurveTo(-30, 62, -24, 80);
+  ctx.moveTo(22, 46); ctx.quadraticCurveTo(36, 62, 30, 80);
+  ctx.moveTo(-52, 28); ctx.quadraticCurveTo(-34, 36, -16, 28);
+  ctx.moveTo(16, 28); ctx.quadraticCurveTo(34, 36, 52, 28);
+  ctx.moveTo(-10, 100); ctx.quadraticCurveTo(0, 104, 10, 100);
+  ctx.stroke();
+}
+function ghostHairBack() {
+  ctx.fillStyle = INK;
+  const pts = [[100, 40], [92, 60], [108, 110], [88, 100], [96, 170], [70, 130], [60, 190], [40, 140]];
+  ctx.beginPath(); ctx.moveTo(-88, -40);
+  ctx.bezierCurveTo(-96, -136, 96, -136, 88, -40);
+  for (const [x, y] of pts) ctx.lineTo(x, y);
+  for (const [x, y] of [...pts].reverse()) ctx.lineTo(-x, y);
+  ctx.closePath(); ctx.fill();
+}
+function ragsBody() {
+  ctx.fillStyle = '#1c1c1c'; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-200, 330); ctx.quadraticCurveTo(-194, 190, -110, 162);
+  for (const [x, y] of [[-40, 150], [-24, 176], [-10, 158], [0, 184], [12, 158], [26, 176], [40, 150], [110, 162]]) ctx.lineTo(x, y);
+  ctx.quadraticCurveTo(194, 190, 200, 330);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = 3;
+  for (let i = 0; i < 13; i++) {
+    const x = -180 + i * 30, y = 212 + i * 9;
+    ctx.beginPath(); ctx.ellipse(x, y, i % 2 ? 6 : 13, i % 2 ? 13 : 6, 0.3, 0, Math.PI * 2); ctx.stroke();
+  }
+}
+function ghostHairFront() {
+  ctx.fillStyle = INK;
+  ctx.beginPath(); ctx.moveTo(-84, -30);
+  ctx.bezierCurveTo(-88, -128, 88, -128, 84, -30);
+  for (const [x, y] of [[78, 30], [64, -10], [56, 44], [40, -14], [30, 28], [16, -20], [4, 10], [-10, -24], [-22, 4], [-36, -26], [-48, 0], [-62, -28], [-74, 6]]) ctx.lineTo(x, y);
+  ctx.closePath(); ctx.fill();
+}
+function gauntLines() {
+  ctx.save();
+  ctx.globalAlpha = 0.55; ctx.fillStyle = dots();
+  ctx.beginPath(); ctx.ellipse(-50, 56, 15, 26, 0.2, 0, Math.PI * 2); ctx.ellipse(50, 56, 15, 26, -0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = INK; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-52, 28); ctx.quadraticCurveTo(-34, 38, -16, 28); ctx.moveTo(16, 28); ctx.quadraticCurveTo(34, 38, 52, 28); ctx.stroke();
+  const r = seeded(99);
+  ctx.fillStyle = '#4a4a4a';
+  for (let i = 0; i < 90; i++) {
+    const x = (r() - 0.5) * 110, y = 60 + r() * 50;
+    if (Math.abs(x) < 60 - (y - 60) * 0.6 && !(y < 90 && Math.abs(x) < 18 && y > 66)) ctx.fillRect(x, y, 1.6, 1.6);
+  }
   ctx.restore();
 }
 
-function drawRig(x, y, face, pose, look, opts = {}) {
-  const s = look.scale;
-  ctx.save();
-  ctx.translate(x, y);
-  if (pose.rot) {
-    const cx = 0, cy = (pose.rotY || 0) * s;
-    ctx.translate(cx, cy); ctx.rotate(pose.rot * face); ctx.translate(-cx, -cy);
-  }
-  ctx.scale(s, s);
+const FACES = {
+  oranus:   { jaw: 1.04, lash: 0, browW: 1,   back: oranusHairBack, body: oranusCoat, front: oranusScarf, hair: oranusHairFront, mark: oranusScar },
+  mantis:   { jaw: 0.9,  lash: 3, browW: 0.7, back: mantisHairBack, body: mantisShoulders, front: mantisNecklace, hair: mantisHairFront, lips: true, mole: true },
+  henchman: { jaw: 1.08, lash: 0, browW: 1.1, back: hoodBack('#1a1a1a'), body: hoodieBody, hair: hoodFront('#1a1a1a'), overlay: crackedMask },
+  oracle:   { jaw: 0.95, lash: 1, browW: 0.8, back: hoodBack('#222'), body: shawlBody, hair: oracleHoodFront, mark: wrinkles, cloudyRight: true },
+  ghost:    { jaw: 0.9,  lash: 0, browW: 0.9, back: ghostHairBack, body: ragsBody, hair: ghostHairFront, mark: gauntLines },
+};
+
+function blinkAmount(seed) { return ((game.t + seed) % 3.7) < 0.12 ? 1 : 0; }
+
+function drawEye(cx, cy, side, E, F) {
+  const open = E.open;
+  const h = 20 * open;
+  const ix = cx - side * 21, ox = cx + side * 25;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
-  if (opts.glow) { ctx.shadowColor = WHITE; ctx.shadowBlur = 14; }
+  if (open < 0.14) {
+    ctx.strokeStyle = INK; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(ix, cy + 3); ctx.quadraticCurveTo(cx, cy + 9, ox + side * 2, cy + 1); ctx.stroke();
+    return;
+  }
+  const upper = () => { ctx.moveTo(ix, cy + 3); ctx.bezierCurveTo(ix + side * 6, cy - h - 2, ox - side * 9, cy - h - 4, ox, cy - 3); };
+  ctx.beginPath(); upper();
+  ctx.bezierCurveTo(ox - side * 6, cy + h * 0.75, ix + side * 9, cy + h * 0.8, ix, cy + 3);
+  ctx.closePath();
+  ctx.fillStyle = E.shadow ? '#c4c4c4' : PAPER; ctx.fill();
+  ctx.save(); ctx.clip();
+  const small = E.iris === 'small';
+  const irx = small ? 8 : 14, iry = small ? 10.5 : 19;
+  const icx = cx + side, icy = cy + 1 + (E.look || 0);
+  const kind = F.cloudyRight && side === 1 ? 'cloudy' : E.iris;
+  const g = ctx.createLinearGradient(0, icy - iry, 0, icy + iry);
+  if (kind === 'cloudy') { g.addColorStop(0, '#dedede'); g.addColorStop(1, '#a8a8a8'); }
+  else if (kind === 'slit') { g.addColorStop(0, '#6a6a6a'); g.addColorStop(1, '#d4d4d4'); }
+  else { g.addColorStop(0, INK); g.addColorStop(0.6, '#2c2c2c'); g.addColorStop(1, '#707070'); }
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.ellipse(icx, icy, irx, iry, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = INK;
+  if (kind === 'slit') { ctx.beginPath(); ctx.ellipse(icx, icy, 2.4, iry * 0.85, 0, 0, Math.PI * 2); ctx.fill(); }
+  else if (kind !== 'cloudy') {
+    ctx.beginPath(); ctx.ellipse(icx, icy + 1, irx * 0.42, iry * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(242,242,242,0.18)'; ctx.lineWidth = 1;
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(icx + Math.cos(a) * irx * 0.5, icy + Math.sin(a) * iry * 0.5); ctx.lineTo(icx + Math.cos(a) * irx * 0.9, icy + Math.sin(a) * iry * 0.9); ctx.stroke();
+    }
+  }
+  if (E.shine !== false && kind !== 'cloudy') {
+    ctx.fillStyle = PAPER;
+    circle(icx - 4, icy - 6, E.shine === 'tiny' ? 1.8 : 4.6);
+    if (E.shine !== 'tiny') circle(icx + 4.5, icy + 6, 2);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(cx - 30, cy - h - 8, 60, 7);
+  ctx.restore();
+  // Lids and lashes
+  ctx.strokeStyle = INK; ctx.lineWidth = 5.2;
+  ctx.beginPath(); ctx.moveTo(ix - side, cy + 2); ctx.bezierCurveTo(ix + side * 6, cy - h - 3, ox - side * 9, cy - h - 5, ox + side * 3, cy - 4); ctx.stroke();
+  ctx.lineWidth = 2.6;
+  for (let i = 0; i < (F.lash || 0); i++) {
+    const sx = ox - side * i * 6, sy = cy - 4 - i * h * 0.22;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + side * (9 - i * 1.5), sy - 7 - i * 2); ctx.stroke();
+  }
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(ox - side, cy); ctx.quadraticCurveTo(cx + side * 9, cy + h * 0.72, cx - side * 6, cy + h * 0.72); ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(cx - side * 8, cy - h - 9); ctx.quadraticCurveTo(cx + side * 8, cy - h - 12, ox - side, cy - h - 5); ctx.stroke();
+}
 
-  const color = opts.flash ? WHITE : look.color;
-  const back = opts.flash ? WHITE : look.back;
+function drawBrow(cx, cy, side, angle, w) {
+  const ix = cx - side * 17, iy = cy + angle * 7;
+  const ox = cx + side * 22, oy = cy - 2 - angle * 2.5;
+  const mx = cx + side * 3, my = Math.min(iy, oy) - 5 - Math.max(0, -angle) * 3;
+  ctx.fillStyle = INK;
+  ctx.beginPath();
+  ctx.moveTo(ix, iy - 3.2 * w);
+  ctx.quadraticCurveTo(mx, my - 2 * w, ox, oy);
+  ctx.quadraticCurveTo(mx, my + 4 * w, ix, iy + 3.2 * w);
+  ctx.closePath(); ctx.fill();
+}
+
+function drawMouth(type, F) {
+  ctx.strokeStyle = INK; ctx.fillStyle = INK; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  const line = draw => { ctx.beginPath(); draw(); ctx.stroke(); };
+  switch (type) {
+    case 'line': line(() => { ctx.moveTo(-11, 75); ctx.quadraticCurveTo(0, 77, 11, 74); }); break;
+    case 'talk': ctx.beginPath(); ctx.ellipse(0, 76, 8, 5.5, 0, 0, Math.PI * 2); ctx.fill(); break;
+    case 'open': ctx.beginPath(); ctx.ellipse(0, 77, 6, 6, 0, 0, Math.PI * 2); ctx.fill(); break;
+    case 'shock': ctx.beginPath(); ctx.ellipse(0, 78, 7.5, 11, 0, 0, Math.PI * 2); ctx.fill(); break;
+    case 'shout':
+      ctx.beginPath(); ctx.moveTo(-17, 68); ctx.quadraticCurveTo(0, 64, 17, 68); ctx.quadraticCurveTo(11, 96, 0, 97); ctx.quadraticCurveTo(-11, 96, -17, 68); ctx.fill();
+      ctx.fillStyle = PAPER; ctx.fillRect(-12, 68, 24, 4);
+      break;
+    case 'smile': line(() => { ctx.moveTo(-15, 71); ctx.quadraticCurveTo(0, 81, 15, 71); }); break;
+    case 'smirk': line(() => { ctx.moveTo(-12, 76); ctx.quadraticCurveTo(4, 78, 18, 68); }); break;
+    case 'grin':
+      line(() => { ctx.moveTo(-24, 67); ctx.quadraticCurveTo(-2, 86, 26, 63); ctx.moveTo(26, 63); ctx.lineTo(30, 58); });
+      ctx.fillStyle = PAPER; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(8, 76); ctx.lineTo(14, 74); ctx.lineTo(11, 83); ctx.closePath(); ctx.fill(); ctx.stroke();
+      break;
+    case 'sad': line(() => { ctx.moveTo(-12, 79); ctx.quadraticCurveTo(0, 71, 12, 79); }); break;
+    case 'grit':
+      ctx.fillStyle = PAPER;
+      ctx.beginPath(); ctx.moveTo(-15, 70); ctx.lineTo(15, 70); ctx.lineTo(12, 82); ctx.lineTo(-12, 82); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.lineWidth = 1.5;
+      line(() => { ctx.moveTo(-14, 76); ctx.lineTo(14, 76); for (let i = -8; i <= 8; i += 8) { ctx.moveTo(i, 70); ctx.lineTo(i, 82); } });
+      break;
+  }
+  if (F.lips && ['line', 'smile', 'smirk', 'grin'].includes(type)) {
+    ctx.lineWidth = 1.6;
+    line(() => { ctx.moveTo(-5, 86); ctx.quadraticCurveTo(0, 88, 5, 86); });
+  }
+}
+
+function drawPortrait(who, exprName, x, y, s, o = {}) {
+  const F = FACES[who], E = { ...EXPR[exprName] };
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(s, s);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+
+  F.back?.();
+  F.body?.();
+  // Neck, with tone shading under the jaw
+  ctx.fillStyle = PAPER; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-27, 60); ctx.lineTo(-25, 156); ctx.lineTo(25, 156); ctx.lineTo(27, 60); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-27, 60); ctx.lineTo(-25, 146); ctx.moveTo(27, 60); ctx.lineTo(25, 146); ctx.stroke();
+  ctx.save(); ctx.beginPath(); ctx.rect(-27, 60, 54, 96); ctx.clip();
+  ctx.globalAlpha = 0.6; ctx.fillStyle = dots(); ctx.beginPath(); ctx.ellipse(0, 96, 46, 30, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // Ears
+  ctx.fillStyle = PAPER;
+  for (const sd of [-1, 1]) {
+    ctx.beginPath(); ctx.ellipse(sd * 70, 14, 9, 17, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(sd * 70, 14, 7, sd < 0 ? Math.PI * 0.6 : -Math.PI * 0.4, sd < 0 ? Math.PI * 1.4 : Math.PI * 0.4); ctx.stroke();
+    ctx.lineWidth = 3;
+  }
+  // Face
+  facePath(F.jaw);
+  ctx.fillStyle = PAPER; ctx.fill(); ctx.lineWidth = 3.2; ctx.stroke();
+  ctx.save(); facePath(F.jaw); ctx.clip();
+  ctx.globalAlpha = 0.5; ctx.fillStyle = dots();
+  ctx.beginPath(); ctx.moveTo(56, -130); ctx.quadraticCurveTo(46, 30, 62, 130); ctx.lineTo(120, 130); ctx.lineTo(120, -130); ctx.fill();
+  ctx.globalAlpha = 1;
+  F.mark?.();
+  if (E.blush) {
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+    for (const sd of [-1, 1]) for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(sd * 44 - 8 + i * 6, 50); ctx.lineTo(sd * 44 - 2 + i * 6, 42); ctx.stroke(); }
+  }
+  if (E.shadow) {
+    // The classic villain shadow across the upper face
+    const g = ctx.createLinearGradient(0, -110, 0, 40);
+    g.addColorStop(0, 'rgba(0,0,0,0.88)'); g.addColorStop(0.75, 'rgba(0,0,0,0.55)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(-120, -130, 240, 170);
+  }
+  ctx.restore();
+  F.front?.();
+
+  if (F.cloudyRight && E.shadow) {
+    const g = ctx.createRadialGradient(34, 8, 4, 34, 8, 60);
+    g.addColorStop(0, 'rgba(242,242,242,0.9)'); g.addColorStop(1, 'rgba(242,242,242,0)');
+    ctx.fillStyle = g; ctx.fillRect(-30, -56, 128, 128);
+  }
+
+  // Eyes, nose, mouth
+  const blink = o.noBlink ? 0 : blinkAmount(o.seed || 0);
+  const closing = o.eyeClose ?? 0;
+  const eyeE = { ...E, open: (E.open ?? 1) * (1 - blink) * (1 - closing) };
+  if (E.happy && closing < 0.5) {
+    ctx.strokeStyle = INK; ctx.lineWidth = 4.5;
+    for (const cx of [-34, 34]) { ctx.beginPath(); ctx.moveTo(cx - 17, 14); ctx.quadraticCurveTo(cx, -2, cx + 17, 14); ctx.stroke(); }
+  } else {
+    drawEye(-34, 8, -1, eyeE, F);
+    drawEye(34, 8, 1, eyeE, F);
+  }
+  ctx.strokeStyle = INK; ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.moveTo(5, 30); ctx.quadraticCurveTo(1, 44, 8, 48); ctx.stroke();
+  drawMouth(o.talking && Math.floor(game.t * 11) % 2 === 0 ? 'talk' : E.mouth, F);
+  if (F.mole) { ctx.fillStyle = INK; circle(48, 34, 2.2); }
+
+  F.hair?.();
+  drawBrow(-34, -24, -1, E.brow, F.browW);
+  drawBrow(34, -24, 1, E.brow, F.browW);
+  F.overlay?.();
+
+  if (E.sweat) {
+    ctx.fillStyle = PAPER; ctx.strokeStyle = INK; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(62, -20); ctx.quadraticCurveTo(72, -2, 62, 4); ctx.quadraticCurveTo(52, -2, 62, -20); ctx.fill(); ctx.stroke();
+  }
+  if (E.veins) {
+    ctx.strokeStyle = PAPER; ctx.lineWidth = 4;
+    const vx = 62, vy = -72;
+    ctx.beginPath();
+    ctx.arc(vx - 7, vy - 7, 6, 0, Math.PI / 2); ctx.moveTo(vx + 7 - 6, vy - 7); ctx.arc(vx + 7, vy - 7, 6, Math.PI / 2, Math.PI);
+    ctx.moveTo(vx - 7 + 6, vy + 7); ctx.arc(vx - 7, vy + 7, 6, 0, -Math.PI / 2, true); ctx.moveTo(vx + 7, vy + 1); ctx.arc(vx + 7, vy + 7, 6, -Math.PI / 2, Math.PI, true);
+    ctx.stroke();
+  }
+  if (E.blood) {
+    ctx.strokeStyle = INK; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(6, 80); ctx.quadraticCurveTo(12, 94, 10, 110); ctx.stroke();
+    ctx.fillStyle = INK; circle(10, 114, 3.5);
+  }
+  ctx.restore();
+}
+
+// ---- Cutscene backgrounds ----
+function focusLines(cx, cy, inner, color, count, seed) {
+  const r = seeded(seed);
+  ctx.fillStyle = color;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + r() * 0.05;
+    const w = 0.004 + r() * 0.012, rin = inner * (0.85 + r() * 0.5), rout = 1300;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * rin, cy + Math.sin(a) * rin);
+    ctx.lineTo(cx + Math.cos(a - w) * rout, cy + Math.sin(a - w) * rout);
+    ctx.lineTo(cx + Math.cos(a + w) * rout, cy + Math.sin(a + w) * rout);
+    ctx.closePath(); ctx.fill();
+  }
+}
+const BG = {
+  tone: () => {
+    const g = ctx.createLinearGradient(0, 0, 0, VH);
+    g.addColorStop(0, '#3a3a3a'); g.addColorStop(1, '#0e0e0e');
+    ctx.fillStyle = g; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+    ctx.globalAlpha = 0.35; ctx.fillStyle = dots(); ctx.fillRect(-80, -80, VW + 160, VH + 160); ctx.globalAlpha = 1;
+    const r = ctx.createRadialGradient(VW / 2, VH * 0.45, 20, VW / 2, VH * 0.45, 380);
+    r.addColorStop(0, 'rgba(242,242,242,0.22)'); r.addColorStop(1, 'rgba(242,242,242,0)');
+    ctx.fillStyle = r; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+  },
+  dark: () => {
+    ctx.fillStyle = '#050505'; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+    const r = ctx.createRadialGradient(VW * 0.8, VH * 0.2, 10, VW * 0.8, VH * 0.2, 520);
+    r.addColorStop(0, 'rgba(242,242,242,0.16)'); r.addColorStop(1, 'rgba(242,242,242,0)');
+    ctx.fillStyle = r; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+  },
+  rain: () => {
+    const g = ctx.createLinearGradient(0, 0, 0, VH);
+    g.addColorStop(0, '#2a2a2a'); g.addColorStop(1, '#070707');
+    ctx.fillStyle = g; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+    for (let i = 0; i < 5; i++) {
+      const x = ((i * 233 + game.t * 8) % (VW + 200)) - 100;
+      const sg = ctx.createLinearGradient(x - 40, 0, x + 40, 0);
+      sg.addColorStop(0, 'rgba(242,242,242,0)'); sg.addColorStop(0.5, 'rgba(242,242,242,0.06)'); sg.addColorStop(1, 'rgba(242,242,242,0)');
+      ctx.fillStyle = sg; ctx.fillRect(x - 40, -80, 80, VH + 160);
+    }
+    drawRain(2);
+  },
+  focus: () => {
+    ctx.fillStyle = PAPER; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+    focusLines(VW / 2, VH / 2, 240, INK, 120, Math.floor(game.t / 0.08) + 1);
+  },
+  speed: () => {
+    ctx.fillStyle = '#0c0c0c'; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+    ctx.fillStyle = PAPER;
+    for (let i = 0; i < 70; i++) {
+      const y = (i * 97.3) % VH, len = 120 + (i * 53) % 380;
+      const x = (((i * 211 - game.t * 2600) % (VW + 600)) + VW + 600) % (VW + 600) - 300;
+      ctx.globalAlpha = 0.2 + (i % 4) * 0.12;
+      ctx.fillRect(x, y, len, 1 + (i % 3));
+    }
+    ctx.globalAlpha = 1;
+  },
+  flash: t => {
+    const v = Math.round(lerp(242, 6, clamp(t / 1.4, 0, 1)));
+    ctx.fillStyle = `rgb(${v},${v},${v})`; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+  },
+};
+
+function drawFaceShot(s, t) {
+  BG[s.bg || 'tone'](t);
+  const x = s.side === 'left' ? VW * 0.34 : s.side === 'right' ? VW * 0.66 : VW / 2;
+  drawPortrait(s.who, s.expr, x, VH * 0.5 - 18, s.scale || 1.32, {
+    talking: isTalking(s.who), seed: s.who.length,
+    eyeClose: s.close ? clamp((t - 1.4) / 1.2, 0, 1) : 0,
+  });
+}
+
+function drawEyesShot(s, t) {
+  BG[s.bg || 'tone'](t);
+  const sc = 3.6, top = VH * 0.26, bot = VH * 0.74;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(-80, top, VW + 160, bot - top); ctx.clip();
+  drawPortrait(s.who, s.expr, VW / 2, VH / 2 - 8 * sc + 10, sc, { noBlink: true });
+  ctx.restore();
+  ctx.fillStyle = '#000';
+  ctx.fillRect(-80, -80, VW + 160, top + 80); ctx.fillRect(-80, bot, VW + 160, VH - bot + 80);
+}
+
+function drawSplitShot(s, t) {
+  const A = [[-80, -80], [VW * 0.57, -80], [VW * 0.43, VH + 80], [-80, VH + 80]];
+  const B = [[VW * 0.57, -80], [VW + 80, -80], [VW + 80, VH + 80], [VW * 0.43, VH + 80]];
+  for (const [poly, side, x] of [[A, s.left, VW * 0.26], [B, s.right, VW * 0.74]]) {
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(...poly[0]); for (const p of poly.slice(1)) ctx.lineTo(...p); ctx.closePath(); ctx.clip();
+    BG[side.bg || 'tone'](t);
+    drawPortrait(side.who, side.expr, x, VH * 0.5 - 14, 1.18, { talking: isTalking(side.who), seed: side.who.length });
+    ctx.restore();
+  }
+  ctx.strokeStyle = PAPER; ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo(VW * 0.57 + 4, -80); ctx.lineTo(VW * 0.43 - 4, VH + 80); ctx.stroke();
+}
+
+function drawImpact(s, t) {
+  const inv = t < 0.4 && Math.floor(t * 14) % 2 === 0;
+  const bg = inv ? INK : PAPER, fg = inv ? PAPER : INK;
+  ctx.fillStyle = bg; ctx.fillRect(-80, -80, VW + 160, VH + 160);
+  focusLines(VW / 2, VH / 2, 70, fg, 170, Math.floor(t / 0.05) + 3);
+  // Claw slashes tearing across the frame
+  ctx.fillStyle = fg;
+  for (let i = 0; i < 3; i++) {
+    const off = (i - 1) * 70;
+    ctx.beginPath();
+    ctx.moveTo(-60 + off, VH * 0.9);
+    ctx.quadraticCurveTo(VW * 0.45 + off, VH * 0.42 - i * 10, VW + 60 + off, VH * 0.06);
+    ctx.quadraticCurveTo(VW * 0.47 + off, VH * 0.5 - i * 10, -60 + off, VH * 0.9);
+    ctx.fill();
+  }
+  ctx.save();
+  ctx.translate(VW / 2, VH / 2); ctx.rotate(-0.12);
+  const k = 1 + Math.max(0, 0.3 - t) * 2;
+  ctx.scale(k, k);
+  ctx.font = '900 150px Cinzel, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 16; ctx.strokeStyle = bg; ctx.strokeText(s.text, 0, 0);
+  ctx.fillStyle = fg; ctx.fillText(s.text, 0, 0);
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawCine() {
+  const s = cine.shots[cine.i], t = cine.t;
+  ctx.save();
+  const z = 1 + t * (s.zoom ?? 0.025);
+  const sh = (s.shake || 0) * Math.max(0, 1 - t / 1.2) + game.shake;
+  ctx.translate(VW / 2 + rand(-sh, sh), VH / 2 + rand(-sh, sh));
+  ctx.scale(z, z);
+  ctx.translate(-VW / 2, -VH / 2);
+  switch (s.kind) {
+    case 'wide': drawWorld(); break;
+    case 'face': drawFaceShot(s, t); break;
+    case 'eyes': drawEyesShot(s, t); break;
+    case 'split': drawSplitShot(s, t); break;
+    case 'impact': drawImpact(s, t); break;
+  }
+  ctx.restore();
+
+  if (s.kind !== 'impact') {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, VW, 46); ctx.fillRect(0, VH - 46, VW, 46);
+  }
+  // Subtitles, anime style: centered, outlined, typed out
+  if (cine.text) {
+    let left = Math.floor(cine.chars);
+    const shown = cine.lines.map(l => { const part = l.slice(0, Math.max(0, left)); left -= l.length + 1; return part; });
+    const baseY = VH - 66 - (cine.lines.length - 1) * 26;
+    ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+    ctx.font = '700 13px Cinzel, serif';
+    ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.fillStyle = '#bdbdbd';
+    ctx.strokeText(s.line.who, VW / 2, baseY - 26); ctx.fillText(s.line.who, VW / 2, baseY - 26);
+    ctx.font = '21px "Special Elite", monospace';
+    ctx.lineWidth = 5; ctx.fillStyle = WHITE;
+    shown.forEach((l, i) => { if (!l) return; ctx.strokeText(l, VW / 2, baseY + i * 26); ctx.fillText(l, VW / 2, baseY + i * 26); });
+  }
+  ctx.font = '12px "Special Elite", monospace'; ctx.fillStyle = '#555'; ctx.textAlign = 'right';
+  ctx.fillText('enter: next   ·   esc: skip', VW - 16, VH - 18);
+  ctx.textAlign = 'left';
+  if (t < 0.12 && s.kind !== 'impact') { ctx.fillStyle = `rgba(0,0,0,${1 - t / 0.12})`; ctx.fillRect(0, 0, VW, VH); }
+}
+
+// =====================================================================
+//  Drawing: realistic silhouette characters
+// =====================================================================
+const LOOKS = {
+  oranus:  { scale: 1,    bulk: 1,    hair: 'spiky', coat: true, scarf: true },
+  grunt:   { scale: 1,    bulk: 1,    hood: 'short', mask: true },
+  thrower: { scale: 0.97, bulk: 0.88, hood: 'long', mask: true },
+  guard:   { scale: 1.04, bulk: 1.1,  helmet: true, shield: true },
+  brute:   { scale: 1.27, bulk: 1.32, pads: true, mask: true },
+  warden:  { scale: 1.5,  bulk: 1.4,  pads: true, horns: true, cape: true, eyesGlow: true },
+  mantis:  { scale: 0.95, bulk: 0.82, hair: 'long', dress: WHITE },
+  oracle:  { scale: 0.92, bulk: 0.9,  hood: 'short', robe: true },
+  ghost:   { scale: 0.98, bulk: 0.82, hair: 'long' },
+};
+
+function joint(x, y, a1, a2, l1, l2, face) {
+  const kx = x + Math.sin(a1) * l1 * face, ky = y + Math.cos(a1) * l1;
+  const ex = kx + Math.sin(a1 + a2) * l2 * face, ey = ky + Math.cos(a1 + a2) * l2;
+  return { kx, ky, ex, ey };
+}
+
+// Angles are measured from straight down; positive swings toward the facing direction
+function skeleton(pose, face) {
   const lean = pose.lean || 0;
-  const hipY = -46 + (pose.bob || 0);
-  const shX = Math.sin(lean) * 34 * face, shY = hipY - Math.cos(lean) * 34;
-  const hx = shX + Math.sin(lean) * 14 * face, hy = shY - 14;
+  const hip = { x: 0, y: -64 + (pose.bob || 0) };
+  const ux = Math.sin(lean) * face, uy = -Math.cos(lean);
+  const chest = { x: ux * 44, y: hip.y + uy * 44 };
+  const sh = { x: ux * 38, y: hip.y + uy * 38 };
+  const ha = lean * 0.6 + (pose.head || 0);
+  const head = { x: chest.x + Math.sin(ha) * face * 19, y: chest.y - Math.cos(ha) * 19 };
+  const shF = { x: sh.x + face * 2, y: sh.y }, shB = { x: sh.x - face * 3, y: sh.y };
+  const hipF = { x: face * 2, y: hip.y }, hipB = { x: -face * 2, y: hip.y };
+  return {
+    lean, hip, chest, sh, head, shF, shB, hipF, hipB, ux, uy,
+    legF: joint(hipF.x, hipF.y, pose.legF[0], pose.legF[1], 33, 33, face),
+    legB: joint(hipB.x, hipB.y, pose.legB[0], pose.legB[1], 33, 33, face),
+    armF: joint(shF.x, shF.y, pose.armF[0], pose.armF[1], 26, 25, face),
+    armB: joint(shB.x, shB.y, pose.armB[0], pose.armB[1], 26, 25, face),
+  };
+}
 
-  // Scarf trails behind Oranus and flutters more when he moves
-  if (look.scarf) {
+function drawLeg(h, j, k, face) {
+  capsule(h.x, h.y, 9 * k, j.kx, j.ky, 6.5 * k);
+  capsule(j.kx, j.ky, 6.5 * k, j.ex, j.ey, 4.6 * k);
+  capsule(j.ex, j.ey, 4.6 * k, j.ex + face * 13 * k, j.ey + 1.5, 3.4 * k);
+}
+function drawArm(s, j, k) {
+  capsule(s.x, s.y, 6 * k, j.kx, j.ky, 4.8 * k);
+  capsule(j.kx, j.ky, 4.8 * k, j.ex, j.ey, 3.8 * k);
+  circle(j.ex + (j.ex - j.kx) * 0.12, j.ey + (j.ey - j.ky) * 0.12, 5 * k);
+}
+
+function shieldAt(sk, face, k) {
+  ctx.translate(sk.armF.ex + face * 5, sk.armF.ey - 6);
+  ctx.rotate(face * 0.08);
+}
+
+function silhouette(sk, L, face, main, back, opts) {
+  const k = L.bulk || 1, h = sk.head;
+  ctx.fillStyle = back;
+  drawArm(sk.shB, sk.armB, k);
+  drawLeg(sk.hipB, sk.legB, k, face);
+  ctx.fillStyle = main;
+
+  if (L.cape) {
+    const fl = Math.sin(game.t * 4) * 4;
+    ctx.beginPath();
+    ctx.moveTo(sk.sh.x - face * 10 * k, sk.sh.y - 4);
+    ctx.quadraticCurveTo(sk.hip.x - face * 30, sk.hip.y + 10, sk.hip.x - face * (34 + fl), 0);
+    ctx.lineTo(sk.hip.x - face * 6, 0);
+    ctx.lineTo(sk.sh.x + face * 4, sk.sh.y);
+    ctx.closePath(); ctx.fill();
+  }
+  if (L.hair === 'long') {
+    const sway = Math.sin(game.t * 2.5) * 3;
+    ctx.beginPath();
+    ctx.moveTo(h.x + face * 6, h.y - 10);
+    ctx.quadraticCurveTo(h.x - face * 4, h.y - 16, h.x - face * 12, h.y - 4);
+    ctx.quadraticCurveTo(h.x - face * 19 + sway, h.y + 30, h.x - face * 17 + sway, h.y + 58);
+    ctx.lineTo(h.x - face * 4 + sway, h.y + 52);
+    ctx.quadraticCurveTo(h.x - face * 2, h.y + 20, h.x + face * 4, h.y + 4);
+    ctx.closePath(); ctx.fill();
+  }
+  if (L.coat) {
+    // Long coat tails flare out behind when running
     const sp = clamp(Math.abs(opts.vx || 0) / 280, 0, 1);
-    let px = shX, py = shY + 2;
-    for (let i = 1; i <= 8; i++) {
-      const nx = shX - face * i * (6 + sp * 2.5);
-      const ny = shY + 2 + i * (1.6 - sp * 0.9) + Math.sin(game.t * 10 - i * 0.8) * (1.2 + sp * 3);
-      ctx.strokeStyle = color; ctx.lineWidth = 6 - i * 0.55;
+    const fl = Math.sin(game.t * 9) * (2 + sp * 5);
+    const w = sk.hip, top = { x: w.x + sk.ux * 10, y: w.y + sk.uy * 10 };
+    ctx.beginPath();
+    ctx.moveTo(top.x + face * 12 * k, top.y);
+    ctx.lineTo(top.x - face * 13 * k, top.y);
+    ctx.quadraticCurveTo(w.x - face * (20 + sp * 18), w.y + 24, w.x - face * (24 + sp * 34) + fl, w.y + 50 - sp * 8);
+    ctx.lineTo(w.x - face * (4 + sp * 10), w.y + 54);
+    ctx.lineTo(w.x + face * 12 * k, w.y + 40);
+    ctx.closePath(); ctx.fill();
+  }
+
+  capsule(sk.hip.x, sk.hip.y, 11 * k, sk.chest.x, sk.chest.y, 14.5 * k);
+  if (L.pads) { circle(sk.shF.x, sk.shF.y, 11 * k); circle(sk.shB.x, sk.shB.y, 10 * k); }
+  if (L.coat) {
+    ctx.beginPath();
+    ctx.moveTo(sk.chest.x - face * 6, sk.chest.y + 2); ctx.lineTo(sk.chest.x - face * 11, sk.chest.y - 11); ctx.lineTo(sk.chest.x + face * 3, sk.chest.y - 1);
+    ctx.closePath(); ctx.fill();
+  }
+
+  drawLeg(sk.hipF, sk.legF, k, face);
+  if (L.robe) {
+    ctx.beginPath();
+    ctx.moveTo(sk.chest.x - 12, sk.chest.y + 6); ctx.lineTo(sk.chest.x + 12, sk.chest.y + 6);
+    ctx.lineTo(sk.hip.x + face * 40, Math.min(sk.hip.y + 66, 34)); ctx.lineTo(sk.hip.x - face * 22, Math.min(sk.hip.y + 66, 34));
+    ctx.closePath(); ctx.fill();
+  }
+
+  capsule(sk.chest.x, sk.chest.y, 5 * k, h.x, h.y + 6, 4.5 * k);
+  ctx.beginPath(); ctx.ellipse(h.x, h.y, 9.5 * k, 11.5 * k, sk.lean * face * 0.5, 0, Math.PI * 2); ctx.fill();
+  circle(h.x + face * 4 * k, h.y + 6 * k, 5.5 * k);
+
+  if (L.hair === 'spiky') {
+    const pts = [[-11, -2], [-20, -6], [-12, -10], [-19, -18], [-8, -15], [-6, -23], [2, -16], [9, -20], [9, -12], [14, -9], [8, -5]];
+    ctx.beginPath(); ctx.moveTo(h.x + face * pts[0][0] * k, h.y + pts[0][1] * k);
+    for (const [px, py] of pts.slice(1)) ctx.lineTo(h.x + face * px * k, h.y + py * k);
+    ctx.closePath(); ctx.fill();
+  }
+  if (L.hood) {
+    ctx.beginPath(); ctx.ellipse(h.x - face * 1.5, h.y - 1, 12.5 * k, 14 * k, 0, 0, Math.PI * 2); ctx.fill();
+    const long = L.hood === 'long';
+    ctx.beginPath();
+    ctx.moveTo(h.x - face * 8 * k, h.y - 10 * k);
+    ctx.lineTo(h.x - face * (long ? 28 : 17) * k, h.y + (long ? 20 + Math.sin(game.t * 6) * 3 : 4) * k);
+    ctx.lineTo(h.x - face * 10 * k, h.y + 8 * k);
+    ctx.closePath(); ctx.fill();
+  }
+  if (L.helmet) {
+    ctx.beginPath(); ctx.arc(h.x, h.y - 1, 12 * k, Math.PI, 0); ctx.lineTo(h.x + face * 13 * k, h.y + 4); ctx.lineTo(h.x - face * 13 * k, h.y + 4); ctx.closePath(); ctx.fill();
+  }
+  if (L.horns) {
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(h.x + s * 6, h.y - 9); ctx.quadraticCurveTo(h.x + s * 15, h.y - 20, h.x + s * 6, h.y - 30); ctx.lineTo(h.x + s * 3, h.y - 10);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  drawArm(sk.shF, sk.armF, k);
+  if (L.shield) {
+    ctx.save(); shieldAt(sk, face, k);
+    ctx.fillRect(-7 * k, -36 * k, 14 * k, 72 * k);
+    ctx.restore();
+  }
+}
+
+function details(sk, L, face, opts) {
+  const h = sk.head, k = L.bulk || 1;
+  const light = opts.flash ? INK : WHITE;
+  if (L.scarf) {
+    const sp = clamp(Math.abs(opts.vx || 0) / 280, 0, 1);
+    ctx.fillStyle = WHITE;
+    ctx.beginPath(); ctx.ellipse(sk.chest.x, sk.chest.y - 3, 9, 5, sk.lean * face, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = WHITE; ctx.lineCap = 'round';
+    // Hangs down like cloth when still, streams out behind when running
+    let px = sk.chest.x - face * 4, py = sk.chest.y - 2;
+    for (let i = 1; i <= 10; i++) {
+      const sway = Math.sin(game.t * (4 + sp * 6) - i * 0.7) * (1.2 + i * 0.25) * (0.6 + sp);
+      const nx = px - face * lerp(2.2, 7.5, sp) + sway * 0.4;
+      const ny = py + lerp(5.2, 1.2, sp) + sway * 0.3;
+      ctx.lineWidth = Math.max(2, 8 - i * 0.55);
       ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(nx, ny); ctx.stroke();
       px = nx; py = ny;
     }
   }
-  if (look.hair) {
-    ctx.strokeStyle = back; ctx.lineWidth = 3;
-    for (let i = 0; i < 4; i++) {
-      ctx.beginPath();
-      ctx.moveTo(hx - face * 4, hy - 4 + i * 2);
-      ctx.quadraticCurveTo(hx - face * (16 + i * 3), hy + 20, hx - face * (10 + i * 4), hy + 44 + i * 3);
+  if (L.dress) {
+    const w = { x: sk.hip.x + sk.ux * 14, y: sk.hip.y + sk.uy * 14 };
+    const sway = Math.sin(game.t * 2) * 2, bottom = Math.min(sk.hip.y + 60, 2);
+    ctx.fillStyle = opts.flash ? INK : L.dress;
+    ctx.beginPath();
+    ctx.moveTo(w.x - 9, w.y); ctx.lineTo(w.x + 9, w.y);
+    ctx.quadraticCurveTo(sk.hip.x + 17, sk.hip.y + 30, sk.hip.x + 25 + sway, bottom);
+    ctx.lineTo(sk.hip.x - 25 + sway, bottom);
+    ctx.quadraticCurveTo(sk.hip.x - 17, sk.hip.y + 30, w.x - 9, w.y);
+    ctx.closePath(); ctx.fill();
+    capsule(w.x, w.y, 9, sk.chest.x, sk.chest.y + 6, 10.5);
+    ctx.strokeStyle = '#7a7a7a'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(sk.hip.x - 8, sk.hip.y + 8); ctx.lineTo(sk.hip.x - 12 + sway, bottom - 2); ctx.moveTo(sk.hip.x + 6, sk.hip.y + 8); ctx.lineTo(sk.hip.x + 12 + sway, bottom - 2); ctx.stroke();
+  }
+  ctx.strokeStyle = light; ctx.lineCap = 'round';
+  if (L.mask) {
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(h.x + face * 1, h.y - 2); ctx.lineTo(h.x + face * 8.5, h.y - 3.5); ctx.stroke();
+  }
+  if (L.helmet) {
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(h.x - face * 2, h.y - 1); ctx.lineTo(h.x + face * 11, h.y - 1); ctx.stroke();
+  }
+  if (L.eyesGlow) {
+    ctx.fillStyle = light;
+    circle(h.x + face * 4, h.y - 2, 1.8); circle(h.x + face * 8.5, h.y - 2.5, 1.6);
+    ctx.lineWidth = 1.2; ctx.strokeStyle = '#8a8a8a';
+    ctx.beginPath(); ctx.moveTo(sk.chest.x - 10, sk.chest.y + 8); ctx.quadraticCurveTo(sk.chest.x, sk.chest.y + 14, sk.chest.x + 10, sk.chest.y + 8);
+    ctx.moveTo(sk.chest.x - 9, sk.chest.y + 18); ctx.quadraticCurveTo(sk.chest.x, sk.chest.y + 24, sk.chest.x + 9, sk.chest.y + 18); ctx.stroke();
+  }
+  if (L.shield) {
+    ctx.save(); shieldAt(sk, face, k);
+    ctx.strokeStyle = '#9a9a9a'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(-7 * k, -36 * k, 14 * k, 72 * k);
+    ctx.fillStyle = '#9a9a9a'; circle(0, 0, 2.5 * k);
+    ctx.restore();
+  }
+  if (opts.claws) {
+    ctx.strokeStyle = WHITE; ctx.lineWidth = 2.5;
+    for (const arm of [sk.armF, sk.armB]) {
+      const ang = Math.atan2(arm.ey - arm.ky, arm.ex - arm.kx);
+      for (let i = 1; i <= 4; i++) {
+        const t = i / 5, x = lerp(arm.kx, arm.ex, t), y = lerp(arm.ky, arm.ey, t);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(ang + Math.PI / 2) * 8, y + Math.sin(ang + Math.PI / 2) * 8); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.moveTo(arm.ex, arm.ey);
+      ctx.lineTo(arm.ex + Math.cos(ang) * 16, arm.ey + Math.sin(ang) * 16);
+      ctx.lineTo(arm.ex + Math.cos(ang) * 16 + Math.cos(ang + 2.4) * 9, arm.ey + Math.sin(ang) * 16 + Math.sin(ang + 2.4) * 9);
       ctx.stroke();
     }
   }
+}
 
-  ctx.lineWidth = look.thick;
-  ctx.strokeStyle = back;
-  const armB = limb(shX, shY + 3, pose.armB[0], pose.armB[1], 19, 19, face);
-  if (opts.claws) clawSpikes(armB);
-  limb(0, hipY, pose.legB[0], pose.legB[1], 24, 25, face);
-  ctx.strokeStyle = color;
-  limb(0, hipY, pose.legF[0], pose.legF[1], 24, 25, face);
-
-  if (look.dress) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(shX * 0.3 - 7, hipY - 10); ctx.lineTo(shX * 0.3 + 7, hipY - 10);
-    ctx.lineTo(19 + (pose.dressSway || 0), hipY + 36); ctx.lineTo(-19 + (pose.dressSway || 0), hipY + 36);
-    ctx.closePath(); ctx.fill();
-  }
-
-  ctx.lineWidth = look.thick * 1.25;
-  ctx.beginPath(); ctx.moveTo(0, hipY); ctx.lineTo(shX, shY); ctx.stroke();
-
-  if (opts.ropes) {
-    ctx.strokeStyle = '#a8a8a8'; ctx.lineWidth = 2;
-    for (const k of [0.35, 0.6]) {
-      const ry = lerp(shY, hipY, k), rx = lerp(shX, 0, k);
-      ctx.beginPath(); ctx.ellipse(rx, ry, 10, 3, 0, 0, Math.PI * 2); ctx.stroke();
+// Two passes: a light copy nudged toward the moon, then the black body on top,
+// which leaves a thin rim of moonlight along the figure's edge
+function drawFigure(x, y, face, pose, look, opts = {}) {
+  const s = look.scale;
+  const sk = skeleton(pose, face);
+  ctx.save();
+  if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
+  for (let pass = 0; pass < 2; pass++) {
+    ctx.save();
+    ctx.translate(x + (pass === 0 ? 1.8 : 0), y + (pass === 0 ? -1.4 : 0));
+    if (pose.rot) {
+      const cy = (pose.rotY || 0) * s;
+      ctx.translate(0, cy); ctx.rotate(pose.rot * face); ctx.translate(0, -cy);
     }
+    ctx.scale(s, s);
+    ctx.lineJoin = 'round';
+    // The warning glow goes on the light pass, so the black body on top stays clean
+    if (pass === 0 && opts.glow) { ctx.shadowColor = WHITE; ctx.shadowBlur = 22; }
+    const main = opts.flash ? WHITE : pass === 0 ? (opts.glow ? WHITE : RIM) : BODY;
+    const back = opts.flash ? WHITE : pass === 0 ? (opts.glow ? WHITE : RIM) : BACK;
+    silhouette(sk, look, face, main, back, opts);
+    if (pass === 1) { ctx.shadowBlur = 0; details(sk, look, face, opts); }
+    ctx.restore();
   }
-
-  // Head
-  ctx.fillStyle = opts.flash ? WHITE : look.head;
-  ctx.strokeStyle = color; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(hx, hy, 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  if (look.mask && !opts.flash) {
-    ctx.strokeStyle = WHITE; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(hx + face * 1, hy - 1); ctx.lineTo(hx + face * 7, hy - 2); ctx.stroke();
-  }
-  if (look.hood) {
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.moveTo(hx - face * 12, hy + 4); ctx.lineTo(hx - face * 4, hy - 20); ctx.lineTo(hx + face * 10, hy - 6); ctx.closePath(); ctx.fill();
-  }
-  if (look.horns) {
-    ctx.strokeStyle = color; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(hx - 6, hy - 8); ctx.quadraticCurveTo(hx - 12, hy - 20, hx - 4, hy - 26); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(hx + 6, hy - 8); ctx.quadraticCurveTo(hx + 12, hy - 20, hx + 4, hy - 26); ctx.stroke();
-  }
-
-  ctx.lineWidth = look.thick; ctx.strokeStyle = color;
-  const armF = limb(shX, shY + 3, pose.armF[0], pose.armF[1], 19, 19, face);
-  if (opts.claws) clawSpikes(armF);
-
   ctx.restore();
+  return sk;
 }
 
 // ---- Poses ----
 const P = {
-  idle: t => ({ lean: 0.06, bob: Math.sin(t * 3) * 1.2, armF: [0.5, 1.9], armB: [0.3, 2.1], legF: [0.22, -0.12], legB: [-0.18, -0.06] }),
+  idle: t => ({ lean: 0.06, bob: Math.sin(t * 3) * 1.4, armF: [0.5, 1.9], armB: [0.3, 2.1], legF: [0.22, -0.12], legB: [-0.18, -0.06] }),
   run: t => {
-    const ph = t * 13, s = Math.sin(ph);
+    const ph = t * 12, s = Math.sin(ph);
     return {
-      lean: 0.22, bob: -Math.abs(Math.cos(ph)) * 3,
+      lean: 0.22, bob: -Math.abs(Math.cos(ph)) * 4,
       armF: [-s * 0.9 + 0.2, 1.4], armB: [s * 0.9 + 0.2, 1.4],
       legF: [s * 0.75, -0.2 - Math.max(0, -Math.cos(ph)) * 1.1],
       legB: [-s * 0.75, -0.2 - Math.max(0, Math.cos(ph)) * 1.1],
     };
   },
   air: () => ({ lean: 0.1, armF: [2.2, 0.6], armB: [1.8, 0.8], legF: [0.9, -1.4], legB: [0.1, -0.9] }),
-  hurt: () => ({ lean: -0.35, armF: [-0.6, 0.4], armB: [-0.9, 0.6], legF: [0.3, -0.2], legB: [-0.3, -0.1] }),
+  hurt: () => ({ lean: -0.35, head: -0.3, armF: [-0.6, 0.4], armB: [-0.9, 0.6], legF: [0.3, -0.2], legB: [-0.3, -0.1] }),
   limp: () => ({ lean: 0, armF: [0.3, 0.2], armB: [-0.3, 0.3], legF: [0.1, -0.05], legB: [-0.1, -0.05] }),
-  tuck: () => ({ lean: 0.4, bob: 18, armF: [1.4, 1.6], armB: [1.2, 1.8], legF: [1.6, -2.4], legB: [1.3, -2.2] }),
-  kneel: () => ({ lean: 0.18, bob: 32, armF: [-0.5, 0.5], armB: [-0.6, 0.4], legF: [1.0, -2.5], legB: [0.3, -1.8] }),
+  tuck: () => ({ lean: 0.4, bob: 26, armF: [1.4, 1.6], armB: [1.2, 1.8], legF: [1.6, -2.4], legB: [1.3, -2.2] }),
+  kneel: () => ({ lean: 0.18, bob: 43, armF: [-0.5, 0.5], armB: [-0.6, 0.4], legF: [1.0, -2.5], legB: [0.3, -1.8] }),
+  sit: t => ({ lean: 0.05, bob: 62, head: 0.15, armF: [0.9, 0.5 + Math.sin(t) * 0.05], armB: [0.8, 0.6], legF: [1.55, -1.55], legB: [1.45, -1.45] }),
   stand: t => ({ lean: 0.02, bob: Math.sin(t * 2) * 1, armF: [0.15, 0.3], armB: [-0.1, 0.3], legF: [0.06, -0.02], legB: [-0.06, -0.02] }),
   // Mantis forelegs: upper arm thrust forward, forearm folded back down beneath it
   pray: t => ({ lean: 0.12, bob: Math.sin(t * 3) * 1, armF: [1.85 + Math.sin(t * 4) * 0.05, 2.75], armB: [1.6, 2.8], legF: [0.06, -0.02], legB: [-0.06, -0.02] }),
@@ -1046,7 +2026,7 @@ function playerPose(p) {
       const k = clamp((u - 0.5) / 0.2, 0, 1);
       return { lean: lerp(-0.25, 0.5, k), armF: [lerp(3.0, 1.2, k), lerp(0.3, 0, k)], armB: [lerp(2.8, 1.0, k), 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
     }
-    case 'dodge': return { ...P.tuck(), rot: (p.t / 0.36) * Math.PI * 2, rotY: -28 };
+    case 'dodge': return { ...P.tuck(), rot: (p.t / 0.36) * Math.PI * 2, rotY: -40 };
     case 'hurt': return P.hurt();
     case 'dying': case 'fallen': return { ...P.limp(), rot: -Math.PI / 2 * Math.min(1, p.t / 0.4) };
   }
@@ -1058,22 +2038,23 @@ function playerPose(p) {
 function enemyPose(e) {
   const t = game.t + e.seed;
   if (e.dead) return { ...P.limp(), rot: -Math.PI / 2 * Math.min(1, e.deadT / 0.35) };
-  const u = e.state === 'windup' ? Math.min(1, e.t / (e.kind === 'dash' ? 0.55 : e.T.windup)) : 1;
+  const shieldUp = e.T.shield ? { armF: [1.25, 0.55] } : {};
+  const u = e.state === 'windup' ? Math.min(1, e.t / e.wind) : 1;
   if (e.state === 'windup') {
     if (e.kind === 'throw') return { lean: -0.1, armF: [lerp(0.4, -2.3, u), 0.6], armB: [0.5, 1.5], legF: [0.3, -0.1], legB: [-0.3, -0.05] };
     if (e.kind === 'dash') return { lean: 0.5, armF: [-1.0, 0.5], armB: [-1.2, 0.5], legF: [0.8, -0.6], legB: [-0.7, -0.3] };
-    if (e.type === 'grunt') return { lean: -0.12 * u, armF: [lerp(0.5, -0.8, u), 1.7], armB: [0.4, 2.0], legF: [0.3, -0.1], legB: [-0.3, -0.05] };
-    return { lean: -0.2 * u, armF: [lerp(0.5, 2.9, u), 0.3], armB: [lerp(0.3, 2.7, u), 0.4], legF: [0.35, -0.15], legB: [-0.35, -0.05] };
+    if (e.kind === 'slam') return { lean: -0.2 * u, armF: [lerp(0.5, 2.9, u), 0.3], armB: [lerp(0.3, 2.7, u), 0.4], legF: [0.35, -0.15], legB: [-0.35, -0.05] };
+    return { lean: -0.12 * u, armF: [lerp(0.5, -0.8, u), 1.7], armB: e.T.shield ? [0.4, 2.0] : [0.4, 2.0], legF: [0.3, -0.1], legB: [-0.3, -0.05] };
   }
   if (e.state === 'attack') {
     if (e.kind === 'throw') return { lean: 0.25, armF: [1.4, 0.2], armB: [0.2, 1.5], legF: [0.4, -0.1], legB: [-0.4, -0.05] };
     if (e.kind === 'dash') return { ...P.run(t * 1.6), lean: 0.6, armF: [1.5, 0], armB: [1.3, 0.1] };
-    if (e.type === 'grunt') return { lean: 0.3, armF: [1.6, 0], armB: [0.3, 2.0], legF: [0.45, -0.15], legB: [-0.35, -0.05] };
-    return { lean: 0.45, armF: [1.0, 0], armB: [0.9, 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
+    if (e.kind === 'slam') return { lean: 0.45, armF: [1.0, 0], armB: [0.9, 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
+    return { lean: 0.3, armF: [1.6, 0], armB: [0.3, 2.0], legF: [0.45, -0.15], legB: [-0.35, -0.05] };
   }
   if (e.state === 'hurt') return P.hurt();
-  if (Math.abs(e.vx) > 5) return P.run(t * (e.T.speed / 150));
-  return P.idle(t);
+  if (Math.abs(e.vx) > 5) return { ...P.run(t * (e.T.speed / 150)), ...shieldUp };
+  return { ...P.idle(t), ...shieldUp };
 }
 
 function mantisPose() {
@@ -1107,20 +2088,23 @@ const MID = (() => {
 
 function drawSky() {
   const g = ctx.createLinearGradient(0, 0, 0, GROUND);
-  g.addColorStop(0, '#080808'); g.addColorStop(1, '#161616');
+  g.addColorStop(0, '#121212'); g.addColorStop(0.55, '#2c2c2c'); g.addColorStop(1, '#7e7e7e');
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, GROUND);
-  const mx = 760 - camX * 0.02, my = 110;
-  const halo = ctx.createRadialGradient(mx, my, 30, mx, my, 140);
-  halo.addColorStop(0, 'rgba(242,242,242,0.12)'); halo.addColorStop(1, 'rgba(242,242,242,0)');
-  ctx.fillStyle = halo; ctx.fillRect(mx - 140, my - 140, 280, 280);
-  ctx.fillStyle = '#e6e6e6';
-  ctx.beginPath(); ctx.arc(mx, my, 42, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#0e0e0e';
-  ctx.beginPath(); ctx.arc(mx + 16, my - 8, 38, 0, Math.PI * 2); ctx.fill();
+  const mx = 760 - camX * 0.02, my = 105;
+  const halo = ctx.createRadialGradient(mx, my, 30, mx, my, 170);
+  halo.addColorStop(0, 'rgba(242,242,242,0.2)'); halo.addColorStop(1, 'rgba(242,242,242,0)');
+  ctx.fillStyle = halo; ctx.fillRect(mx - 170, my - 170, 340, 340);
+  ctx.fillStyle = '#ececec'; circle(mx, my, 40);
+  ctx.fillStyle = 'rgba(0,0,0,0.08)'; circle(mx - 12, my - 8, 9); circle(mx + 10, my + 12, 6); circle(mx + 14, my - 14, 4);
+  ctx.fillStyle = 'rgba(18,18,18,0.6)';
+  for (let i = 0; i < 4; i++) {
+    const x = (((i * 310 - camX * 0.03 - game.t * 6) % (VW + 500)) + VW + 500) % (VW + 500) - 250;
+    ctx.beginPath(); ctx.ellipse(x, 70 + i * 36, 230, 8, 0, 0, Math.PI * 2); ctx.fill();
+  }
 }
 
 function drawFar() {
-  ctx.fillStyle = '#121212';
+  ctx.fillStyle = '#5c5c5c';
   const off = camX * 0.15;
   for (const b of FAR) {
     const x = b.x - off;
@@ -1139,17 +2123,21 @@ function drawMid() {
   // Mantis' tower, with one lit window
   const tx = MANTIS_X * 0.45 + 120 - off;
   if (tx > -200 && tx < VW + 200) {
-    ctx.fillStyle = '#1b1b1b';
+    ctx.fillStyle = '#262626';
     ctx.fillRect(tx, GROUND - 330, 110, 330);
     ctx.beginPath(); ctx.moveTo(tx - 10, GROUND - 330); ctx.lineTo(tx + 55, GROUND - 410); ctx.lineTo(tx + 120, GROUND - 330); ctx.fill();
-    ctx.fillStyle = 0.5 + Math.sin(game.t * 2) * 0.1 > 0.5 ? '#d8d8d8' : '#bdbdbd';
+    ctx.fillStyle = '#e8e8e8';
     ctx.fillRect(tx + 44, GROUND - 290, 22, 30);
   }
+  // Haze where the city meets the ground
+  const g = ctx.createLinearGradient(0, GROUND - 150, 0, GROUND);
+  g.addColorStop(0, 'rgba(190,190,190,0)'); g.addColorStop(1, 'rgba(190,190,190,0.14)');
+  ctx.fillStyle = g; ctx.fillRect(0, GROUND - 150, VW, 150);
 }
 
 function drawProp(o, x) {
   const base = GROUND;
-  ctx.fillStyle = '#1b1b1b'; ctx.strokeStyle = '#1b1b1b';
+  ctx.fillStyle = '#363636'; ctx.strokeStyle = '#363636';
   switch (o.kind) {
     case 'tree': {
       ctx.lineWidth = 6; ctx.lineCap = 'round';
@@ -1163,22 +2151,21 @@ function drawProp(o, x) {
       break;
     }
     case 'fence':
-      ctx.lineWidth = 3;
       for (let i = 0; i <= o.w; i += 16) ctx.fillRect(x + i, base - 38, 4, 38);
       ctx.fillRect(x, base - 30, o.w, 3); ctx.fillRect(x, base - 16, o.w, 3);
       break;
     case 'stall':
       ctx.fillRect(x, base - 60, o.w, 60);
-      ctx.fillStyle = '#242424';
-      ctx.beginPath(); ctx.moveTo(x - 10, base - 60); ctx.lineTo(x + o.w / 2, base - 90); ctx.lineTo(x + o.w + 10, base - 60); ctx.fill();
       ctx.fillStyle = '#2c2c2c';
+      ctx.beginPath(); ctx.moveTo(x - 10, base - 60); ctx.lineTo(x + o.w / 2, base - 90); ctx.lineTo(x + o.w + 10, base - 60); ctx.fill();
+      ctx.fillStyle = '#444';
       for (let i = 0; i < o.w; i += 18) ctx.fillRect(x + i, base - 60, 9, 8);
       break;
     case 'house':
       ctx.fillRect(x, base - o.h, o.w, o.h);
       for (let wy = base - o.h + 14; wy < base - 20; wy += 26)
         for (let wx = x + 10; wx < x + o.w - 14; wx += 22) {
-          ctx.fillStyle = ((wx * 7 + wy * 3) | 0) % 5 === 0 ? '#555' : '#262626';
+          ctx.fillStyle = ((wx * 7 + wy * 3) | 0) % 5 === 0 ? '#a0a0a0' : '#2a2a2a';
           ctx.fillRect(wx, wy, 9, 12);
         }
       break;
@@ -1199,26 +2186,50 @@ function drawProp(o, x) {
 }
 
 function drawGround() {
-  ctx.fillStyle = '#0c0c0c';
+  ctx.fillStyle = '#101010';
   ctx.fillRect(0, GROUND, VW, VH - GROUND);
-  ctx.fillStyle = '#3a3a3a';
+  ctx.fillStyle = '#4a4a4a';
   ctx.fillRect(0, GROUND, VW, 2);
-  ctx.fillStyle = '#1f1f1f';
+  ctx.fillStyle = '#1e1e1e';
   const start = Math.floor(camX / 90) * 90;
   for (let wx = start; wx < camX + VW + 90; wx += 90) ctx.fillRect(wx - camX, GROUND + 14 + ((wx / 90) % 3) * 9, 26, 2);
   // Street lamps with soft cones of light
   const ls = Math.floor(camX / 640) * 640 + 320;
   for (let wx = ls; wx < camX + VW + 640; wx += 640) {
     const x = wx - camX;
-    ctx.fillStyle = '#2a2a2a';
-    ctx.fillRect(x - 2, GROUND - 170, 4, 170);
-    ctx.fillRect(x - 2, GROUND - 170, 24, 4);
-    const g = ctx.createLinearGradient(0, GROUND - 165, 0, GROUND);
-    g.addColorStop(0, 'rgba(242,242,242,0.10)'); g.addColorStop(1, 'rgba(242,242,242,0)');
+    ctx.fillStyle = '#141414';
+    ctx.fillRect(x - 2, GROUND - 190, 4, 190);
+    ctx.fillRect(x - 2, GROUND - 190, 24, 4);
+    const g = ctx.createLinearGradient(0, GROUND - 185, 0, GROUND);
+    g.addColorStop(0, 'rgba(242,242,242,0.12)'); g.addColorStop(1, 'rgba(242,242,242,0)');
     ctx.fillStyle = g;
-    ctx.beginPath(); ctx.moveTo(x + 14, GROUND - 165); ctx.lineTo(x + 80, GROUND); ctx.lineTo(x - 52, GROUND); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#cfcfcf';
-    ctx.fillRect(x + 10, GROUND - 167, 10, 4);
+    ctx.beginPath(); ctx.moveTo(x + 14, GROUND - 185); ctx.lineTo(x + 84, GROUND); ctx.lineTo(x - 56, GROUND); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e0e0e0';
+    ctx.fillRect(x + 10, GROUND - 187, 10, 4);
+  }
+}
+
+function drawProps() {
+  for (const pr of props) {
+    if (pr.kind === 'henchman') {
+      const pose = pr.dead ? { ...P.limp(), rot: -Math.PI / 2 } : { ...P.kneel(), head: 0.5, lean: 0.35, armF: [0.4, 0.6], armB: [0.9, 1.2] };
+      drawFigure(pr.x, GROUND, pr.face, pose, LOOKS.grunt);
+    } else if (pr.kind === 'oracle') {
+      ctx.fillStyle = '#0d0d0d'; ctx.fillRect(pr.x - 26, GROUND - 34, 52, 34);
+      ctx.strokeStyle = '#3a3a3a'; ctx.lineWidth = 1.5; ctx.strokeRect(pr.x - 26, GROUND - 34, 52, 34);
+      drawFigure(pr.x, GROUND - 34, pr.face, P.sit(game.t), LOOKS.oracle);
+    } else if (pr.kind === 'ghost') {
+      const postX = pr.x - pr.face * 60;
+      ctx.fillStyle = '#121212'; ctx.fillRect(postX - 8, GROUND - 200, 16, 200);
+      const pose = { ...P.kneel(), head: 0.35, lean: 0.25, armF: [-0.9, 0.6], armB: [-1.1, 0.5] };
+      const sk = drawFigure(pr.x, GROUND, pr.face, pose, LOOKS.ghost);
+      const s = LOOKS.ghost.scale;
+      ctx.strokeStyle = '#9a9a9a'; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
+      for (const arm of [sk.armF, sk.armB]) {
+        ctx.beginPath(); ctx.moveTo(pr.x + arm.ex * s, GROUND + arm.ey * s); ctx.lineTo(postX, GROUND - 120); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
   }
 }
 
@@ -1230,8 +2241,8 @@ function updateRain(dt) {
     if (d.y > VH) { d.y = rand(-60, -10); d.x = rand(0, VW + 200); }
   }
 }
-function drawRain() {
-  ctx.strokeStyle = 'rgba(242,242,242,0.13)'; ctx.lineWidth = 1;
+function drawRain(boost = 1) {
+  ctx.strokeStyle = `rgba(242,242,242,${0.13 * boost})`; ctx.lineWidth = 1;
   ctx.beginPath();
   for (const d of rain) { ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - d.len * 0.22, d.y + d.len); }
   ctx.stroke();
@@ -1254,7 +2265,7 @@ function drawGrain() {
 }
 function drawVignette() {
   const g = ctx.createRadialGradient(VW / 2, VH / 2, VH * 0.35, VW / 2, VH / 2, VH * 0.95);
-  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.7)');
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.65)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
 }
 
@@ -1278,7 +2289,7 @@ function drawBubble(x, y, text) {
   ctx.fillStyle = WHITE;
   ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, w, h, 6) : ctx.rect(bx, by, w, h); ctx.fill();
   ctx.beginPath(); ctx.moveTo(x - 6, by + h); ctx.lineTo(x + 6, by + h); ctx.lineTo(x, by + h + 9); ctx.fill();
-  ctx.fillStyle = '#0a0a0a'; ctx.textAlign = 'left';
+  ctx.fillStyle = INK; ctx.textAlign = 'left';
   lines.forEach((l, i) => ctx.fillText(l, bx + 10, by + 20 + i * 18));
 }
 
@@ -1297,7 +2308,7 @@ function drawLetters(letters, cx, baseline, size, alpha = 1, gap = 6) {
       const pad = Math.max(2, gap / 2 - 3); // leave a sliver between neighbouring boxes
       ctx.fillStyle = WHITE;
       ctx.fillRect(x - pad, baseline - size * 0.8, widths[i] + pad * 2, size * 0.94);
-      ctx.fillStyle = '#0a0a0a';
+      ctx.fillStyle = INK;
       boxes.push({ x: x + widths[i] / 2, ch: l.ch });
     } else ctx.fillStyle = WHITE;
     ctx.fillText(l.ch, x, baseline);
@@ -1321,39 +2332,45 @@ function drawWorld() {
   ctx.translate(-camX, 0);
 
   for (const s of splats) {
-    ctx.fillStyle = '#242424';
+    ctx.fillStyle = '#262626';
     for (const b of s.blobs) { ctx.beginPath(); ctx.ellipse(s.x + b.dx, GROUND + 4, b.rx, b.ry, 0, 0, Math.PI * 2); ctx.fill(); }
   }
 
-  if (game.arena) {
-    ctx.strokeStyle = 'rgba(242,242,242,0.12)'; ctx.lineWidth = 2; ctx.setLineDash([6, 10]);
-    for (const x of [game.arena.left + 6, game.arena.left + VW - 6]) { ctx.beginPath(); ctx.moveTo(x, GROUND - 200); ctx.lineTo(x, GROUND); ctx.stroke(); }
+  if (game.arena && game.state === 'play') {
+    ctx.strokeStyle = 'rgba(242,242,242,0.15)'; ctx.lineWidth = 2; ctx.setLineDash([6, 10]);
+    for (const x of [game.arena.left + 6, game.arena.left + VW - 6]) { ctx.beginPath(); ctx.moveTo(x, GROUND - 220); ctx.lineTo(x, GROUND); ctx.stroke(); }
     ctx.setLineDash([]);
   }
 
+  drawProps();
+
   // Mantis waits at the end of the road. When she reveals herself she grows taller.
-  const mx = mantis.x - mantis.lunge * 60;
+  const mx = mantis.x - mantis.lunge * 70;
   const revealed = mantis.state === 'pray' || mantis.state === 'strike';
   const grow = revealed ? (mantis.state === 'strike' ? 1 : ease(Math.min(1, mantis.t / 0.9))) : 0;
-  const mLook = { ...LOOKS.mantis, scale: lerp(LOOKS.mantis.scale, 1.35, grow), thick: lerp(6, 7.5, grow) };
-  drawRig(mx, GROUND, -1, mantisPose(), mLook, { ropes: mantis.state === 'bound', claws: revealed, glow: revealed });
+  const mLook = { ...LOOKS.mantis, scale: lerp(LOOKS.mantis.scale, 1.35, grow) };
+  drawFigure(mx, GROUND, -1, mantisPose(), mLook, { claws: revealed, glow: revealed });
+  if (mantis.state === 'bound') {
+    ctx.strokeStyle = '#8a8a8a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(mx - 4, GROUND - 52, 14, 4, 0, 0, Math.PI * 2); ctx.ellipse(mx - 4, GROUND - 38, 14, 4, 0, 0, Math.PI * 2); ctx.stroke();
+  }
 
   for (const e of enemies) {
     if (!e.dead) continue;
-    drawRig(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { alpha: 1 - clamp((e.deadT - 1.5) / 1, 0, 1) });
+    drawFigure(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { alpha: 1 - clamp((e.deadT - 1.5) / 1, 0, 1) });
   }
   for (const e of enemies) {
     if (e.dead) continue;
-    drawRig(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { flash: e.flash > 0, glow: e.state === 'windup' });
+    drawFigure(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { flash: e.flash > 0, glow: e.state === 'windup' });
     if (e.state === 'windup') {
-      ctx.fillStyle = WHITE; ctx.font = '900 22px Cinzel, serif'; ctx.textAlign = 'center';
-      ctx.fillText('!', e.x, e.y - e.T.h - 16);
+      ctx.fillStyle = WHITE; ctx.font = '900 24px Cinzel, serif'; ctx.textAlign = 'center';
+      ctx.fillText('!', e.x, e.y - e.T.h - 18);
     }
   }
 
   const p = player;
   const blink = p.inv > 0 && p.state !== 'dodge' && p.state !== 'hurt' && Math.floor(game.t * 14) % 2 === 0;
-  drawRig(p.x, p.y, p.face, playerPose(p), LOOKS.oranus, { vx: p.vx, alpha: blink ? 0.35 : 1 });
+  drawFigure(p.x, p.y, p.face, playerPose(p), LOOKS.oranus, { vx: p.vx, alpha: blink ? 0.4 : 1 });
 
   // Slash arcs while an attack is active
   if (p.state === 'light' || p.state === 'heavy') {
@@ -1361,7 +2378,7 @@ function drawWorld() {
     if (p.t >= a.active[0] - 0.02 && p.t <= a.active[1] + 0.05) {
       ctx.strokeStyle = WHITE; ctx.lineWidth = p.state === 'heavy' ? 5 : 3;
       ctx.globalAlpha = 0.85;
-      const cx = p.x + p.face * 18, cy = p.y - 62, r = a.reach * 0.8;
+      const cx = p.x + p.face * 22, cy = p.y - 84, r = a.reach * 0.8;
       const s0 = p.state === 'heavy' ? -1.4 : -0.7, s1 = p.state === 'heavy' ? 1.0 : 0.5;
       ctx.beginPath();
       if (p.face > 0) ctx.arc(cx, cy, r, s0, s1); else ctx.arc(cx, cy, r, Math.PI - s1, Math.PI - s0);
@@ -1371,9 +2388,18 @@ function drawWorld() {
   }
 
   for (const k of projectiles) {
+    if (k.type === 'wave') {
+      ctx.strokeStyle = WHITE; ctx.globalAlpha = clamp(k.life / 0.6, 0, 1);
+      for (let i = 0; i < 3; i++) {
+        ctx.lineWidth = 3 - i;
+        ctx.beginPath(); ctx.ellipse(k.x - k.dir * i * 10, GROUND, 16 + i * 8, 7 + i * 6, 0, Math.PI, 0); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      continue;
+    }
     ctx.save(); ctx.translate(k.x, k.y); ctx.rotate(k.rot);
     ctx.strokeStyle = WHITE; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(9, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(10, 0); ctx.stroke();
     ctx.restore();
   }
 
@@ -1395,13 +2421,17 @@ function drawWorld() {
   for (const t of texts) {
     ctx.globalAlpha = 1 - t.t / 0.9;
     ctx.font = t.big ? '700 22px Cinzel, serif' : '16px "Special Elite", monospace';
-    ctx.fillStyle = t.big ? WHITE : '#d0d0d0';
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.strokeText(t.text, t.x, t.y - t.t * 40);
+    ctx.fillStyle = t.big ? WHITE : '#e0e0e0';
     ctx.fillText(t.text, t.x, t.y - t.t * 40);
   }
   ctx.globalAlpha = 1;
 
-  for (const e of enemies) if (e.say && !e.dead) drawBubble(e.x, e.y - e.T.h - 26, e.say.text);
-  if (mantis.say) drawBubble(mantis.x, GROUND - 120, mantis.say.text);
+  if (game.state === 'play' || game.state === 'dead') {
+    for (const e of enemies) if (e.say && !e.dead) drawBubble(e.x, e.y - e.T.h - 30, e.say.text);
+    if (mantis.say) drawBubble(mantis.x, GROUND - 150, mantis.say.text);
+  }
 
   ctx.restore();
   drawRain();
@@ -1440,12 +2470,12 @@ function drawHUD() {
   const tx = VW - 270, tw = 230, ty = 38;
   ctx.strokeStyle = '#5a5a5a'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx + tw, ty); ctx.stroke();
-  const prog = clamp(p.x / (MANTIS_X - 115), 0, 1);
+  const prog = clamp(p.x / (MANTIS_X - 125), 0, 1);
   ctx.strokeStyle = WHITE;
   ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx + tw * prog, ty); ctx.stroke();
   for (const [lx, ch] of [[tx + tw, 'M'], [tx + tw * prog, 'O']]) {
     ctx.fillStyle = WHITE; ctx.fillRect(lx - 10, ty - 11, 20, 22);
-    ctx.fillStyle = '#0a0a0a'; ctx.font = '900 15px Cinzel, serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = INK; ctx.font = '900 15px Cinzel, serif'; ctx.textAlign = 'center';
     ctx.fillText(ch, lx, ty + 6);
   }
   ctx.textAlign = 'left';
@@ -1453,7 +2483,7 @@ function drawHUD() {
   if (bossRef && !bossRef.dead) {
     const w = 420, bx = (VW - w) / 2, byy = VH - 42;
     ctx.fillStyle = WHITE; ctx.font = '700 14px Cinzel, serif'; ctx.textAlign = 'center';
-    ctx.fillText('THE WARDEN', VW / 2, byy - 8);
+    ctx.fillText(bossRef.phase2 ? 'THE WARDEN — ENRAGED' : 'THE WARDEN', VW / 2, byy - 8);
     ctx.fillStyle = '#2a2a2a'; ctx.fillRect(bx, byy, w, 8);
     ctx.fillStyle = WHITE; ctx.fillRect(bx, byy, w * Math.max(0, bossRef.hp) / bossRef.T.hp, 8);
     ctx.strokeStyle = WHITE; ctx.lineWidth = 1; ctx.strokeRect(bx, byy, w, 8);
@@ -1471,7 +2501,7 @@ function drawHUD() {
     ctx.fillText(b.title, VW / 2, 150);
     const w = ctx.measureText(b.title).width;
     ctx.fillRect(VW / 2 - w / 2 - 70, 138, 50, 1); ctx.fillRect(VW / 2 + w / 2 + 20, 138, 50, 1);
-    if (b.sub) { ctx.font = '16px "Special Elite", monospace'; ctx.fillStyle = '#9a9a9a'; ctx.fillText(b.sub, VW / 2, 178); }
+    if (b.sub) { ctx.font = '16px "Special Elite", monospace'; ctx.fillStyle = '#cfcfcf'; ctx.fillText(b.sub, VW / 2, 178); }
     ctx.globalAlpha = 1;
   }
 
@@ -1516,46 +2546,21 @@ function drawDeathScreen() {
 function drawPause() {
   ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, 0, VW, VH);
   ctx.textAlign = 'center'; ctx.fillStyle = WHITE;
-  ctx.font = '900 46px Cinzel, serif'; ctx.fillText('PAUSED', VW / 2, 200);
+  ctx.font = '900 46px Cinzel, serif'; ctx.fillText('PAUSED', VW / 2, 190);
   ctx.font = '17px "Special Elite", monospace'; ctx.fillStyle = '#b0b0b0';
-  ['← → / A D  move', '↑ / W / Space  jump', 'J / Z  strike (tap for a combo)', 'K / X  heavy strike', 'L / Shift  dodge roll', 'M  sound   ·   P  resume']
-    .forEach((l, i) => ctx.fillText(l, VW / 2, 250 + i * 28));
+  ['← → / A D  move', '↑ / W / Space  jump', 'J / Z  strike (tap for a combo)', 'K / X  heavy strike (breaks shields)', 'L / Shift  dodge roll (time it for a perfect dodge)', 'M  sound   ·   P  resume']
+    .forEach((l, i) => ctx.fillText(l, VW / 2, 240 + i * 28));
   ctx.textAlign = 'left';
-}
-
-function drawCutsceneUI() {
-  const c = game.cut, bar = 62 * ease(c.bars);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, VW, bar); ctx.fillRect(0, VH - bar, VW, bar);
-  if (c.phase !== 'talk') return;
-  const l = c.lines[c.i];
-  if (!l.who) return;
-  // Sits below the characters' feet, over the bottom letterbox bar
-  const bx = 90, by = GROUND + 14, bw = VW - 180, bh = VH - GROUND - 22;
-  ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(bx, by, bw, bh);
-  ctx.strokeStyle = WHITE; ctx.lineWidth = 1.5; ctx.strokeRect(bx, by, bw, bh);
-  ctx.fillStyle = l.who === 'MANTIS' ? WHITE : '#0a0a0a';
-  ctx.font = '900 15px Cinzel, serif';
-  const nw = ctx.measureText(l.who).width + 20;
-  if (l.who === 'ORANUS') { ctx.fillStyle = WHITE; ctx.fillRect(bx + 16, by - 12, nw, 24); ctx.fillStyle = '#0a0a0a'; }
-  else { ctx.fillStyle = '#0a0a0a'; ctx.fillRect(bx + 16, by - 12, nw, 24); ctx.strokeRect(bx + 16, by - 12, nw, 24); ctx.fillStyle = WHITE; }
-  ctx.textAlign = 'left';
-  ctx.fillText(l.who, bx + 26, by + 6);
-  ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = WHITE;
-  wrapText(c.text.slice(0, Math.floor(c.chars)), bw - 50).forEach((line, i) => ctx.fillText(line, bx + 24, by + 36 + i * 25));
-  if (c.chars >= c.text.length && Math.floor(game.t * 2.5) % 2 === 0) {
-    ctx.textAlign = 'right'; ctx.fillText('▼', bx + bw - 16, by + bh - 12); ctx.textAlign = 'left';
-  }
 }
 
 function drawTitleScreen() {
   const saved = camX;
   camX = 200 + Math.sin(game.t * 0.08) * 160;
   drawSky(); drawFar(); drawMid(); drawGround();
-  drawRig(250, GROUND, 1, P.idle(game.t), LOOKS.oranus, { vx: 0 });
+  drawFigure(250, GROUND, 1, P.idle(game.t), LOOKS.oranus, { vx: 0 });
   drawRain();
   camX = saved;
-  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, VW, VH);
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, VW, VH);
 
   const boxes = drawLetters(TITLE, VW / 2, 210, 100, 1, 16);
   ctx.textAlign = 'center'; ctx.font = '15px "Special Elite", monospace'; ctx.fillStyle = '#a8a8a8';
@@ -1566,7 +2571,7 @@ function drawTitleScreen() {
     ctx.font = '700 20px Cinzel, serif'; ctx.fillStyle = WHITE;
     ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO BEGIN' : 'PRESS ENTER', VW / 2, 380);
   }
-  ctx.font = '14px "Special Elite", monospace'; ctx.fillStyle = '#7a7a7a';
+  ctx.font = '14px "Special Elite", monospace'; ctx.fillStyle = '#8a8a8a';
   ctx.fillText('No checkpoints. Every death makes you weaker.', VW / 2, 488);
   ctx.textAlign = 'left';
 }
@@ -1581,14 +2586,15 @@ function drawIntro() {
     wrapText(INTRO[s.i].slice(0, Math.floor(s.chars)), 720).forEach((l, i) => ctx.fillText(l, VW / 2, 260 + i * 36));
   } else {
     ctx.font = '900 30px Cinzel, serif'; ctx.fillStyle = WHITE;
-    ctx.fillText('HOW TO FIGHT', VW / 2, 130);
+    ctx.fillText('HOW TO FIGHT', VW / 2, 120);
     ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = '#c8c8c8';
     const lines = document.body.classList.contains('touch')
-      ? ['◀ ▶  move', '▲  jump', 'HIT  strike (tap for a combo)', 'HVY  heavy strike', 'ROLL  dodge through attacks']
-      : ['← → / A D  move', '↑ / W / Space  jump', 'J / Z  strike (tap for a combo)', 'K / X  heavy strike', 'L / Shift  dodge roll', 'P  pause   ·   M  sound'];
-    lines.forEach((l, i) => ctx.fillText(l, VW / 2, 185 + i * 32));
+      ? ['◀ ▶  move', '▲  jump', 'HIT  strike (tap for a combo)', 'HVY  heavy strike, breaks shields', 'ROLL  dodge through attacks']
+      : ['← → / A D  move', '↑ / W / Space  jump', 'J / Z  strike (tap for a combo)', 'K / X  heavy strike, breaks shields', 'L / Shift  dodge roll', 'P  pause   ·   M  sound'];
+    lines.forEach((l, i) => ctx.fillText(l, VW / 2, 170 + i * 32));
     ctx.fillStyle = '#8a8a8a'; ctx.font = '16px "Special Elite", monospace';
-    ctx.fillText('Watch for the glow: an enemy that lights up is about to strike.', VW / 2, 410);
+    ctx.fillText('An enemy that glows is about to strike. Roll at the last moment for a perfect dodge.', VW / 2, 390);
+    ctx.fillText('They will surround you. Keep moving.', VW / 2, 414);
     if (Math.floor(game.t * 1.6) % 2 === 0) {
       ctx.font = '700 18px Cinzel, serif'; ctx.fillStyle = WHITE;
       ctx.fillText(document.body.classList.contains('touch') ? 'TAP TO BEGIN' : 'PRESS ENTER', VW / 2, 470);
@@ -1652,12 +2658,12 @@ function render() {
     case 'title': drawTitleScreen(); break;
     case 'intro': drawIntro(); break;
     case 'final': drawFinal(); break;
+    case 'cine': drawCine(); break;
     default:
       drawWorld();
-      if (game.state !== 'cutscene') drawHUD();
+      drawHUD();
       if (game.state === 'dead') drawDeathScreen();
       if (game.state === 'paused') drawPause();
-      if (game.state === 'cutscene') drawCutsceneUI();
   }
   drawGrain();
   drawVignette();
