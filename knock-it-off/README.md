@@ -40,7 +40,7 @@ The game captures your mouse when a round starts, so there's nothing to hold dow
 | `src/cat.js` | Mr. Biscuit: physics body, camera-relative movement, double jump, sitting, procedural animation |
 | `src/owner.js` | The owner's AI: patrol, hearing, vision cone with line-of-sight, chase, catch, being lured |
 | `src/effects.js` | Shards, splashes and puddles, drawn with a single instanced mesh |
-| `src/audio.js` | Every sound and the music, synthesised with the Web Audio API (no audio files) |
+| `src/audio.js` | Every sound and the music, synthesised with the Web Audio API (no audio files needed), plus the cat's voice and the owner's shouts |
 | `src/ui.js`, `src/style.css` | HUD, popups, speech bubbles and overlays |
 
 A few details worth knowing:
@@ -48,6 +48,25 @@ A few details worth knowing:
 - **The owner's eyes:** a cone check plus a raycast against the furniture. Their suspicion rises while they can see a guilty cat and drains when they can't.
 - **Pathing:** a small hand-built graph of walkable points with breadth-first search, laid out so no straight edge crosses furniture.
 - **Models:** every character and object is built in code from primitive shapes, so there are no model or texture files.
+
+## Sound
+
+- **Meows** come in four kinds (a classic meow, a kitten mew, a rolling "mrrow" and a long yowl). Each is a buzzy voice pushed through vowel-like resonances that glide from "ee" to "ah" to "oo", with vibrato and a little breath. Press <kbd>Q</kbd> to hear one.
+- **Purring** is built the way a real purr works: about 25 rough pulses a second that swell and fade with each breath. The cat purrs on its own when it sits looking innocent, and while it's being petted.
+- **The owner yells** when something breaks ("Ack!", "Whoa!", "Oh no!", and "GERALD!" if the fishbowl goes). He uses your browser's built-in text-to-speech voice, so what you hear depends on the voices installed on your computer. If there isn't one, he makes a synthesised grunt instead. The same word also pops up over his head.
+
+### Using real cat recordings
+
+The cat sounds are synthesised, not recorded. If you'd rather use real ones, put your own `.mp3`, `.ogg` or `.wav` files in `public/sounds/` and list them in `public/sounds/manifest.json`:
+
+```json
+{
+  "meow": ["meow1.mp3", "meow2.mp3"],
+  "purr": ["purr.mp3"]
+}
+```
+
+The game picks a random meow each time (with a slight pitch variation) and loops the purr recording for as long as it needs. Leave the lists empty to keep the synthesised sounds. Make sure you have the right to use any recordings you add, especially in a public repo.
 
 ## Run it locally
 

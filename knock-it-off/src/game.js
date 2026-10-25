@@ -12,6 +12,14 @@ import { Cat } from './cat.js';
 import { Owner } from './owner.js';
 
 const WORDS = ['CRASH!', 'Oops. (Not sorry.)', 'Gravity works!', 'Smashing!', 'Cat-astrophe!', 'Purrfect!', 'Whoopsie!', 'Nailed it!', 'That was fragile.'];
+// What the owner yells. Each one is spoken aloud and pops up over his head.
+const SHOUTS = {
+  crash: ['Ack!', 'Whoa!', 'Oh no!', 'Hey!', 'What was that?!', 'Gah!'],
+  notice: ['Hey!', 'Biscuit?!', 'Oi!', 'What did you do?!'],
+  caught: ['Bad cat!', 'Biscuit!', 'Not again!', 'Seriously?!'],
+  aww: ['Aww!', 'Awww, good boy!'],
+  pet: ["Who's a good boy?", 'Aww, hello!'],
+};
 const NO_INPUT = { isDown: () => false, take: () => false };
 const _v = new THREE.Vector3();
 
@@ -111,8 +119,18 @@ export class Game {
     this.stats = { broken: 0, thuds: 0 };
     this.lureCd = 0;
     this.meowCd = 0;
+    this.sitT = 0;
+    this.purrCd = 0;
+    this.lastBreak = null;
     this.pendingEnd = null;
     this.endDelay = 0;
+  }
+
+  // The owner yells something: you hear it, and it pops up over his head
+  ownerShout(kind) {
+    const text = SHOUTS[kind] ? pick(SHOUTS[kind]) : kind;
+    this.sound.shout(text, { pitch: rand(0.72, 0.9), rate: rand(1.15, 1.3) });
+    this.ui.worldPop(text, _v.set(this.owner.x, 2.25, this.owner.z), this.camera, 'word');
   }
 
   begin() {
@@ -221,6 +239,7 @@ export class Game {
     if (d.puddle && pos.y < 0.5) this.effects.puddle(pos.x, pos.z, d.puddle, d.fish ? 0.55 : 0.32);
     this.sound.crash(d.sound);
     this.award(p, pick(WORDS));
+    this.lastBreak = d;
     this.guilt = Math.min(1, this.guilt + 0.5);
     this.owner.hear(pos.x, pos.z);
     this.shake = Math.max(this.shake, 0.18);
@@ -229,6 +248,7 @@ export class Game {
 
   thudScore(p) {
     this.stats.thuds++;
+    this.lastBreak = p.def;
     this.award(p, 'Thud.');
     this.guilt = Math.min(1, this.guilt + 0.15);
     this.owner.hear(p.body.position.x, p.body.position.z);
@@ -303,7 +323,7 @@ export class Game {
     if (this.meowCd > 0) return;
     this.meowCd = 1.2;
     this.cat.meow();
-    this.sound.meow(rand(0.92, 1.1));
+    this.sound.meow(pick(['meow', 'meow', 'mew', 'trill']), rand(0.92, 1.1));
     this.ui.worldPop('MEOW!', _v.set(this.cat.x, this.cat.y + 0.9, this.cat.z), this.camera, 'word');
     if (this.lureCd <= 0 && this.owner.lure(this.cat)) {
       this.lureCd = 10;
@@ -314,6 +334,8 @@ export class Game {
   onCaught() {
     this.strikes++;
     this.sound.caught();
+    this.sound.meow('yowl', rand(0.92, 1.05));     // the indignant cat
+    this.ownerShout('caught');
     this.ui.flash();
     const fine = Math.round(this.score * 0.1);
     this.score -= fine;
@@ -403,8 +425,18 @@ export class Game {
     this.pendingThuds.length = 0;
     this.syncProps();
 
+    // a purr while the cat sits there looking sweet
+    this.purrCd = Math.max(0, this.purrCd - dt);
+    this.sitT = this.cat.sitting ? this.sitT + dt : 0;
+    if (this.sitT > 1.1 && this.purrCd <= 0) { this.sound.purr(3, 0.7); this.purrCd = 3.4; }
+
     this.owner.update(dt, this);
-    if (this.owner.noticed) this.sound.gasp();
+    if (this.owner.heardEvent) {
+      this.owner.heardEvent = false;
+      const d = this.lastBreak;
+      this.ownerShout(d && d.fish ? 'GERALD!' : d && Math.random() < 0.3 ? `My ${d.name.toLowerCase()}!` : 'crash');
+    }
+    if (this.owner.noticed) this.ownerShout('notice');
     this.effects.update(dt);
     this.updateFish(dt);
 

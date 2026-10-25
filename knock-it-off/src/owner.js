@@ -210,7 +210,6 @@ export class Owner {
   update(dt, game) {
     const cat = game.cat;
     this.noticed = false;
-    this.heardEvent = false;
     this.catchCd = Math.max(0, this.catchCd - dt);
     if (this.speech && (this.speech.t -= dt) <= 0) this.speech = null;
 
@@ -232,6 +231,7 @@ export class Owner {
         this.awwT = game.t;
         this.say(pick(LINES.aww));
         game.sound.chime(3);
+        game.ownerShout('aww');
       }
     }
 
@@ -304,7 +304,9 @@ export class Owner {
             this.state = 'pet';
             this.timer = 3.5;
             this.say(pick(LINES.pet), 3);
-            game.sound.purr(3.2);
+            game.sound.purr(3.4);
+            game.purrCd = 3.6;           // so the sitting purr doesn't pile on top of this one
+            game.ownerShout('pet');
           }
         }
         break;
