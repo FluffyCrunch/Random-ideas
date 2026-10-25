@@ -15,7 +15,7 @@ export class UI {
       arrow: $('ownerArrow'), hint: $('hint'), flash: $('flash'),
       start: $('start'), pause: $('pause'), end: $('end'),
       endTitle: $('endTitle'), endSub: $('endSub'), endStats: $('endStats'), endRating: $('endRating'),
-      mute: $('muteBtn'),
+      mute: $('muteBtn'), aim: $('aim'), aimZone: $('aimZone'),
     };
     this.last = {};
   }
@@ -106,6 +106,16 @@ export class UI {
     f.classList.remove('go');
     void f.offsetWidth;
     f.classList.add('go');
+  }
+
+  // The cursor drives the camera, so show where it is while playing (and hide the system arrow)
+  aim(playing, mouse) {
+    const e = this.el;
+    document.body.classList.toggle('aiming', playing);
+    const show = playing && mouse.active;
+    e.aim.hidden = !show;
+    e.aimZone.hidden = !playing;
+    if (show) e.aim.style.transform = `translate(${mouse.px}px, ${mouse.py}px)`;
   }
 
   setMuted(m) { this.el.mute.classList.toggle('off', m); }

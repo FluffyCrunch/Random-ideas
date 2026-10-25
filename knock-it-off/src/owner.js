@@ -304,8 +304,7 @@ export class Owner {
             this.state = 'pet';
             this.timer = 3.5;
             this.say(pick(LINES.pet), 3);
-            game.sound.purr(3.4);
-            game.purrCd = 3.6;           // so the sitting purr doesn't pile on top of this one
+            game.sound.purr(3.2);
             game.ownerShout('pet');
           }
         }

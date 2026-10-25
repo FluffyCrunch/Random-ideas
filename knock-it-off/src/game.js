@@ -21,6 +21,13 @@ const SHOUTS = {
   pet: ["Who's a good boy?", 'Aww, hello!'],
 };
 const NO_INPUT = { isDown: () => false, take: () => false };
+
+// How hard the camera turns for a cursor position (-1..1 from the middle of the window)
+const CURSOR_DEAD = 0.14;
+const cursorTurn = v => {
+  const a = Math.abs(v);
+  return a < CURSOR_DEAD ? 0 : Math.sign(v) * Math.pow((a - CURSOR_DEAD) / (1 - CURSOR_DEAD), 1.4);
+};
 const _v = new THREE.Vector3();
 
 export class Game {
@@ -67,8 +74,6 @@ export class Game {
     this.resize();
     addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); });
-    // Esc releases a captured mouse without the page seeing the key, so pause when that happens
-    this.input.onLockChange = locked => { if (!locked && this.state === 'playing') this.pause(); };
     const on = (id, fn) => document.getElementById(id).addEventListener('click', () => { this.sound.unlock(); this.sound.click(); fn(); });
     on('playBtn', () => this.begin());
     on('resumeBtn', () => this.resume());
@@ -119,17 +124,14 @@ export class Game {
     this.stats = { broken: 0, thuds: 0 };
     this.lureCd = 0;
     this.meowCd = 0;
-    this.sitT = 0;
-    this.purrCd = 0;
     this.lastBreak = null;
     this.pendingEnd = null;
     this.endDelay = 0;
   }
 
-  // The owner yells something: you hear it, and it pops up over his head
+  // The owner yells something, in comic lettering over his head
   ownerShout(kind) {
     const text = SHOUTS[kind] ? pick(SHOUTS[kind]) : kind;
-    this.sound.shout(text, { pitch: rand(0.72, 0.9), rate: rand(1.15, 1.3) });
     this.ui.worldPop(text, _v.set(this.owner.x, 2.25, this.owner.z), this.camera, 'word');
   }
 
@@ -137,8 +139,6 @@ export class Game {
     this.sound.unlock();
     this.resetRound();
     this.state = 'playing';
-    this.input.wantLock = true;
-    this.input.lock();
     for (const n of ['start', 'pause', 'end']) this.ui.hide(n);
     this.ui.show('hud');
     this.ui.el.hint.classList.remove('fade');
@@ -149,15 +149,11 @@ export class Game {
   pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
-    this.input.wantLock = false;
-    this.input.unlock();
     this.ui.show('pause');
   }
   resume() {
     if (this.state !== 'paused') return;
     this.state = 'playing';
-    this.input.wantLock = true;
-    this.input.lock();
     this.ui.hide('pause');
   }
   toggleMute() { this.sound.setMuted(!this.sound.muted); this.ui.setMuted(this.sound.muted); }
@@ -165,8 +161,6 @@ export class Game {
   finish(reason) {
     if (this.state !== 'playing') return;
     this.state = 'over';
-    this.input.wantLock = false;
-    this.input.unlock();     // give the cursor back for the end screen
     const win = reason === 'win';
     const goal = RULES.goal;
     const total = PLACEMENTS.length;
@@ -323,7 +317,7 @@ export class Game {
     if (this.meowCd > 0) return;
     this.meowCd = 1.2;
     this.cat.meow();
-    this.sound.meow(pick(['meow', 'meow', 'mew', 'trill']), rand(0.92, 1.1));
+    this.sound.meow(rand(0.92, 1.1));
     this.ui.worldPop('MEOW!', _v.set(this.cat.x, this.cat.y + 0.9, this.cat.z), this.camera, 'word');
     if (this.lureCd <= 0 && this.owner.lure(this.cat)) {
       this.lureCd = 10;
@@ -334,7 +328,6 @@ export class Game {
   onCaught() {
     this.strikes++;
     this.sound.caught();
-    this.sound.meow('yowl', rand(0.92, 1.05));     // the indignant cat
     this.ownerShout('caught');
     this.ui.flash();
     const fine = Math.round(this.score * 0.1);
@@ -367,6 +360,7 @@ export class Game {
     if (this.state === 'playing') this.step(dt);
     else if (this.state === 'menu' || this.state === 'over') this.idle(dt);
 
+    this.ui.aim(this.state === 'playing', input.mouse);
     this.world.tv.material.emissiveIntensity = 0.5 + Math.sin(this.t * 3) * 0.12;
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
@@ -396,16 +390,19 @@ export class Game {
     this.meowCd = Math.max(0, this.meowCd - dt);
     this.lureCd = Math.max(0, this.lureCd - dt);
 
-    // camera control: right-drag or arrow keys to orbit, wheel to zoom
-    const cam = this.cam;
-    const sens = input.locked ? 0.0026 : 0.005;     // a captured mouse sends far more movement per swipe
-    cam.yaw -= input.orbit.dx * sens;
-    cam.pitch = clamp(cam.pitch + input.orbit.dy * sens * 0.8, 0.12, 1.15);
+    // The camera turns toward the cursor: move it right to look right, up to look up.
+    // A calm patch in the middle keeps the view still, and the further out you go, the faster it turns.
+    const cam = this.cam, m = input.mouse;
+    if (m.active) {
+      cam.yaw -= cursorTurn(m.x) * 2.7 * dt;
+      cam.pitch = clamp(cam.pitch + cursorTurn(m.y) * 1.3 * dt, 0.12, 1.15);
+    }
     cam.yaw += ((input.isDown('ArrowLeft') ? 1 : 0) - (input.isDown('ArrowRight') ? 1 : 0)) * 1.9 * dt;
     cam.pitch = clamp(cam.pitch + ((input.isDown('ArrowDown') ? 1 : 0) - (input.isDown('ArrowUp') ? 1 : 0)) * 1.1 * dt, 0.12, 1.15);
     cam.dist = clamp(cam.dist + input.wheel * 0.45, 3, 8.5);
 
-    if (input.take('Mouse0') || input.take('KeyF')) this.doSwat();
+    // everything the cat does is on the keyboard
+    if (input.take('KeyF') || input.take('KeyE')) this.doSwat();
     if (input.take('KeyQ')) this.doMeow();
 
     const petting = this.owner.state === 'pet';
@@ -424,11 +421,6 @@ export class Game {
     this.pendingBreaks.length = 0;
     this.pendingThuds.length = 0;
     this.syncProps();
-
-    // a purr while the cat sits there looking sweet
-    this.purrCd = Math.max(0, this.purrCd - dt);
-    this.sitT = this.cat.sitting ? this.sitT + dt : 0;
-    if (this.sitT > 1.1 && this.purrCd <= 0) { this.sound.purr(3, 0.7); this.purrCd = 3.4; }
 
     this.owner.update(dt, this);
     if (this.owner.heardEvent) {

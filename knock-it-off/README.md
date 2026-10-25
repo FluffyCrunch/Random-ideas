@@ -13,14 +13,14 @@ This one is a proper game-dev project, not a single HTML file: **Three.js** for 
 | <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> | Move (relative to the camera) |
 | <kbd>Shift</kbd> | Sprint |
 | <kbd>Space</kbd> | Jump; press again in mid-air for a double jump |
-| Left click or <kbd>F</kbd> | Swat whatever is in front of you |
+| <kbd>F</kbd> or <kbd>E</kbd> | Swat whatever is in front of you |
 | <kbd>C</kbd> (hold) | Sit and look innocent |
 | <kbd>Q</kbd> | Meow, to lure your human over |
-| Move the mouse | Look around: the camera follows your mouse |
+| Move the mouse | Turn the camera toward the cursor (no clicking or dragging) |
 | Mouse wheel | Zoom the camera in and out |
-| <kbd>Esc</kbd> / <kbd>M</kbd> | Pause and free your mouse / sound on and off |
+| <kbd>Esc</kbd> / <kbd>M</kbd> | Pause / sound on and off |
 
-The game captures your mouse when a round starts, so there's nothing to hold down. Press <kbd>Esc</kbd> to get your cursor back (this also pauses), and click **Back to the crime** to jump back in. If your browser won't capture the mouse, holding the right mouse button and dragging, or the arrow keys, still turn the camera.
+**The camera follows your cursor.** Move it to the right of the screen and the view turns right, move it up and you look up. A small calm zone in the middle (the dashed circle) keeps the view still, and the further toward the edge you go, the faster it turns. Everything the cat does is on the keyboard, so you never need to click. The arrow keys also turn the camera if you prefer them.
 
 **Tips**
 - Things break when they hit something hard enough. Light items like mugs shatter from a short fall; plants and laptops need a longer drop.
@@ -40,7 +40,7 @@ The game captures your mouse when a round starts, so there's nothing to hold dow
 | `src/cat.js` | Mr. Biscuit: physics body, camera-relative movement, double jump, sitting, procedural animation |
 | `src/owner.js` | The owner's AI: patrol, hearing, vision cone with line-of-sight, chase, catch, being lured |
 | `src/effects.js` | Shards, splashes and puddles, drawn with a single instanced mesh |
-| `src/audio.js` | Every sound and the music, synthesised with the Web Audio API (no audio files needed), plus the cat's voice and the owner's shouts |
+| `src/audio.js` | Every sound effect and the soundtrack, synthesised with the Web Audio API (no audio files) |
 | `src/ui.js`, `src/style.css` | HUD, popups, speech bubbles and overlays |
 
 A few details worth knowing:
@@ -49,24 +49,9 @@ A few details worth knowing:
 - **Pathing:** a small hand-built graph of walkable points with breadth-first search, laid out so no straight edge crosses furniture.
 - **Models:** every character and object is built in code from primitive shapes, so there are no model or texture files.
 
-## Sound
+## Music
 
-- **Meows** come in four kinds (a classic meow, a kitten mew, a rolling "mrrow" and a long yowl). Each is a buzzy voice pushed through vowel-like resonances that glide from "ee" to "ah" to "oo", with vibrato and a little breath. Press <kbd>Q</kbd> to hear one.
-- **Purring** is built the way a real purr works: about 25 rough pulses a second that swell and fade with each breath. The cat purrs on its own when it sits looking innocent, and while it's being petted.
-- **The owner yells** when something breaks ("Ack!", "Whoa!", "Oh no!", and "GERALD!" if the fishbowl goes). He uses your browser's built-in text-to-speech voice, so what you hear depends on the voices installed on your computer. If there isn't one, he makes a synthesised grunt instead. The same word also pops up over his head.
-
-### Using real cat recordings
-
-The cat sounds are synthesised, not recorded. If you'd rather use real ones, put your own `.mp3`, `.ogg` or `.wav` files in `public/sounds/` and list them in `public/sounds/manifest.json`:
-
-```json
-{
-  "meow": ["meow1.mp3", "meow2.mp3"],
-  "purr": ["purr.mp3"]
-}
-```
-
-The game picks a random meow each time (with a slight pitch variation) and loops the purr recording for as long as it needs. Leave the lists empty to keep the synthesised sounds. Make sure you have the right to use any recordings you add, especially in a public repo.
+The soundtrack is a mischievous tiptoe in D minor, generated live in the browser: a springy pizzicato bass, a bouncy marimba tune, plucked strings answering on the off-beats, woodblock taps and a cartoon boing at the end of each phrase, all swung so it bounces. When your human gets suspicious, the tempo climbs, clashing strings creep in, and once they're chasing you a heartbeat starts.
 
 ## Run it locally
 
