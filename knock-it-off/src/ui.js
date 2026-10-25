@@ -15,7 +15,7 @@ export class UI {
       arrow: $('ownerArrow'), hint: $('hint'), flash: $('flash'),
       start: $('start'), pause: $('pause'), end: $('end'),
       endTitle: $('endTitle'), endSub: $('endSub'), endStats: $('endStats'), endRating: $('endRating'),
-      mute: $('muteBtn'), aim: $('aim'), aimZone: $('aimZone'),
+      mute: $('muteBtn'), aim: $('aim'),
     };
     this.last = {};
   }
@@ -114,7 +114,6 @@ export class UI {
     document.body.classList.toggle('aiming', playing);
     const show = playing && mouse.active;
     e.aim.hidden = !show;
-    e.aimZone.hidden = !playing;
     if (show) e.aim.style.transform = `translate(${mouse.px}px, ${mouse.py}px)`;
   }
 

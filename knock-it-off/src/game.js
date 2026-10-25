@@ -1,18 +1,18 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { RULES, ROOM, MATS } from './constants.js';
+import { RULES, ROOM, MATS, G } from './constants.js';
 import { clamp, lerp, rand, pick, sph, cone, at } from './gfx.js';
 import { Input } from './input.js';
 import { Sound } from './audio.js';
 import { UI, money } from './ui.js';
 import { Effects } from './effects.js';
 import { Prop } from './props.js';
-import { buildWorld, PLACEMENTS, CAT_SPAWN } from './world.js';
+import { buildWorld, PLACEMENTS, CAT_SPAWN, CAT_FACING } from './world.js';
 import { Cat } from './cat.js';
 import { Owner } from './owner.js';
 
 const WORDS = ['CRASH!', 'Oops. (Not sorry.)', 'Gravity works!', 'Smashing!', 'Cat-astrophe!', 'Purrfect!', 'Whoopsie!', 'Nailed it!', 'That was fragile.'];
-// What the owner yells. Each one is spoken aloud and pops up over his head.
+// What the owner yells, in comic lettering over his head.
 const SHOUTS = {
   crash: ['Ack!', 'Whoa!', 'Oh no!', 'Hey!', 'What was that?!', 'Gah!'],
   notice: ['Hey!', 'Biscuit?!', 'Oi!', 'What did you do?!'],
@@ -22,12 +22,12 @@ const SHOUTS = {
 };
 const NO_INPUT = { isDown: () => false, take: () => false };
 
-// How hard the camera turns for a cursor position (-1..1 from the middle of the window)
-const CURSOR_DEAD = 0.14;
-const cursorTurn = v => {
-  const a = Math.abs(v);
-  return a < CURSOR_DEAD ? 0 : Math.sign(v) * Math.pow((a - CURSOR_DEAD) / (1 - CURSOR_DEAD), 1.4);
-};
+// The camera starts low and close behind the cat, at about the height of a cat's eyes.
+// It can tilt up and down a fair way, but never flips to a top-down view.
+const PITCH_MIN = -0.12, PITCH_MAX = 0.75, PITCH_START = 0.07, DIST_START = 3.0;
+// How far the camera turns per pixel of mouse movement: move the mouse fast and the view turns fast
+const SENS_YAW = 0.0042, SENS_PITCH = 0.0034;
+
 const _v = new THREE.Vector3();
 
 export class Game {
@@ -65,7 +65,12 @@ export class Game {
     this.fish = [];
     this.pendingBreaks = [];
     this.pendingThuds = [];
-    this.cam = { yaw: 0.3, pitch: 0.42, dist: 5.4 };
+    this.cam = { yaw: 0.3, pitch: PITCH_START, dist: DIST_START };
+    this.camTarget = new THREE.Vector3();       // the point the camera looks at, which trails the cat smoothly
+    this.camDist = DIST_START;                  // how far back it actually is (it moves in when something blocks the view)
+    this._camRay = new CANNON.RaycastResult();
+    this._cf = new CANNON.Vec3();
+    this._ct = new CANNON.Vec3();
     this.shake = 0;
     this.t = 0;
     this.state = 'menu';
@@ -74,6 +79,8 @@ export class Game {
     this.resize();
     addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); });
+    // Esc releases a captured mouse without the page seeing the key, so pause when that happens
+    this.input.onLockChange = locked => { if (!locked && this.state === 'playing') this.pause(); };
     const on = (id, fn) => document.getElementById(id).addEventListener('click', () => { this.sound.unlock(); this.sound.click(); fn(); });
     on('playBtn', () => this.begin());
     on('resumeBtn', () => this.resume());
@@ -114,7 +121,8 @@ export class Game {
     }
 
     this.cat.teleport(CAT_SPAWN.x, CAT_SPAWN.y, CAT_SPAWN.z);
-    this.cat.yaw = 0;
+    this.cat.yaw = CAT_FACING;
+    this.behindCat();
     this.owner.reset();
     this.score = 0;
     this.strikes = 0;
@@ -129,6 +137,16 @@ export class Game {
     this.endDelay = 0;
   }
 
+  // Put the camera right behind the cat, looking the way it's facing
+  behindCat() {
+    this.cam.yaw = this.cat.yaw + Math.PI;
+    this.cam.pitch = PITCH_START;
+    this.cam.dist = DIST_START;
+    this.camDist = DIST_START;
+    this.camTarget.set(this.cat.x, this.cat.y + 0.3, this.cat.z);
+    this.camPos = null;
+  }
+
   // The owner yells something, in comic lettering over his head
   ownerShout(kind) {
     const text = SHOUTS[kind] ? pick(SHOUTS[kind]) : kind;
@@ -139,6 +157,8 @@ export class Game {
     this.sound.unlock();
     this.resetRound();
     this.state = 'playing';
+    this.input.wantLock = true;
+    this.input.lock();
     for (const n of ['start', 'pause', 'end']) this.ui.hide(n);
     this.ui.show('hud');
     this.ui.el.hint.classList.remove('fade');
@@ -149,11 +169,15 @@ export class Game {
   pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
+    this.input.wantLock = false;
+    this.input.unlock();
     this.ui.show('pause');
   }
   resume() {
     if (this.state !== 'paused') return;
     this.state = 'playing';
+    this.input.wantLock = true;
+    this.input.lock();
     this.ui.hide('pause');
   }
   toggleMute() { this.sound.setMuted(!this.sound.muted); this.ui.setMuted(this.sound.muted); }
@@ -161,6 +185,8 @@ export class Game {
   finish(reason) {
     if (this.state !== 'playing') return;
     this.state = 'over';
+    this.input.wantLock = false;
+    this.input.unlock();     // give the cursor back for the end screen
     const win = reason === 'win';
     const goal = RULES.goal;
     const total = PLACEMENTS.length;
@@ -336,6 +362,8 @@ export class Game {
     this.combo.count = 0;
     this.ui.callout(fine ? `CAUGHT!  -${money(fine)}` : 'CAUGHT!', 'bad');
     this.cat.teleport(CAT_SPAWN.x, CAT_SPAWN.y, CAT_SPAWN.z);
+    this.cat.yaw = CAT_FACING;
+    this.behindCat();
     if (this.strikes >= RULES.strikes) { this.pendingEnd = 'grounded'; this.endDelay = 1.6; }
   }
 
@@ -360,7 +388,7 @@ export class Game {
     if (this.state === 'playing') this.step(dt);
     else if (this.state === 'menu' || this.state === 'over') this.idle(dt);
 
-    this.ui.aim(this.state === 'playing', input.mouse);
+    this.ui.aim(this.state === 'playing' && !input.locked, input.mouse);
     this.world.tv.material.emissiveIntensity = 0.5 + Math.sin(this.t * 3) * 0.12;
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
@@ -390,16 +418,15 @@ export class Game {
     this.meowCd = Math.max(0, this.meowCd - dt);
     this.lureCd = Math.max(0, this.lureCd - dt);
 
-    // The camera turns toward the cursor: move it right to look right, up to look up.
-    // A calm patch in the middle keeps the view still, and the further out you go, the faster it turns.
-    const cam = this.cam, m = input.mouse;
-    if (m.active) {
-      cam.yaw -= cursorTurn(m.x) * 2.7 * dt;
-      cam.pitch = clamp(cam.pitch + cursorTurn(m.y) * 1.3 * dt, 0.12, 1.15);
-    }
+    // Camera: real mouse-look. The view turns by however far the mouse moves (right = look right,
+    // up = look up), so a fast flick turns it fast. This works with or without the mouse being captured.
+    const cam = this.cam;
+    cam.yaw -= input.look.dx * SENS_YAW;
+    cam.pitch += input.look.dy * SENS_PITCH;
     cam.yaw += ((input.isDown('ArrowLeft') ? 1 : 0) - (input.isDown('ArrowRight') ? 1 : 0)) * 1.9 * dt;
-    cam.pitch = clamp(cam.pitch + ((input.isDown('ArrowDown') ? 1 : 0) - (input.isDown('ArrowUp') ? 1 : 0)) * 1.1 * dt, 0.12, 1.15);
-    cam.dist = clamp(cam.dist + input.wheel * 0.45, 3, 8.5);
+    cam.pitch += ((input.isDown('ArrowDown') ? 1 : 0) - (input.isDown('ArrowUp') ? 1 : 0)) * 1.0 * dt;
+    cam.pitch = clamp(cam.pitch, PITCH_MIN, PITCH_MAX);
+    cam.dist = clamp(cam.dist + input.wheel * 0.3, 1.8, 6);
 
     // everything the cat does is on the keyboard
     if (input.take('KeyF') || input.take('KeyE')) this.doSwat();
@@ -450,26 +477,54 @@ export class Game {
 
   updateCamera(dt) {
     const cam = this.cam, c = this.cat;
-    let target, yaw = cam.yaw, pitch = cam.pitch, dist = cam.dist;
-    if (this.state === 'playing' || this.state === 'paused') {
-      target = _v.set(c.x, c.y + 0.5, c.z);
+    const inRound = this.state === 'playing' || this.state === 'paused';
+    this.shake = Math.max(0, this.shake - dt * 0.8);
+    let want, look;
+
+    if (inRound) {
+      // look at a point just above the cat's head that trails it smoothly, so its steps don't jolt the view
+      _v.set(c.x, c.y + 0.3, c.z);
+      this.camTarget.lerp(_v, 1 - Math.exp(-12 * dt));
+      const t = this.camTarget, cp = Math.cos(cam.pitch);
+      const dx = Math.sin(cam.yaw) * cp, dy = Math.sin(cam.pitch), dz = Math.cos(cam.yaw) * cp;
+
+      // if a wall, shelf or the ceiling is in the way, move the camera in front of it:
+      // quickly when something blocks the view, and slowly back out once it's clear
+      this._cf.set(t.x, t.y, t.z);
+      this._ct.set(t.x + dx * cam.dist, t.y + dy * cam.dist, t.z + dz * cam.dist);
+      this._camRay.reset();
+      this.physics.raycastClosest(this._cf, this._ct, { collisionFilterMask: G.STATIC, skipBackfaces: true }, this._camRay);
+      const free = this._camRay.hasHit ? Math.max(0.8, this._camRay.distance - 0.3) : cam.dist;
+      this.camDist = lerp(this.camDist, free, 1 - Math.exp(-(free < this.camDist ? 25 : 2.5) * dt));
+
+      want = new THREE.Vector3(t.x + dx * this.camDist, t.y + dy * this.camDist, t.z + dz * this.camDist);
+      want.x = clamp(want.x, ROOM.x0 + 0.4, ROOM.x1 - 0.4);
+      want.z = clamp(want.z, ROOM.z0 + 0.4, ROOM.z1 - 0.4);
+      want.y = clamp(want.y, 0.22, ROOM.h - 0.2);
+      this.camPos = want;
+      // look out over the cat toward the room ahead, so the cat sits in the lower part of the screen
+      look = _v.set(t.x - Math.sin(cam.yaw) * 2.2, t.y + 0.12, t.z - Math.cos(cam.yaw) * 2.2);
+
+      // the view opens up a little when the cat sprints
+      const fov = 60 + Math.min(1, c.speed / 8) * 6;
+      this.camera.fov = lerp(this.camera.fov, fov, 1 - Math.exp(-4 * dt));
+      this.camera.updateProjectionMatrix();
     } else {
       // menu: a slow lap around the room
       cam.yaw += dt * 0.12;
-      yaw = cam.yaw; pitch = 0.4; dist = 10.5;
-      target = _v.set(0, 1.0, 0);
+      const pitch = 0.4, dist = 10.5, cp = Math.cos(pitch);
+      want = new THREE.Vector3(Math.sin(cam.yaw) * cp * dist, 1.0 + Math.sin(pitch) * dist, Math.cos(cam.yaw) * cp * dist);
+      want.x = clamp(want.x, ROOM.x0 + 0.5, ROOM.x1 - 0.5);
+      want.z = clamp(want.z, ROOM.z0 + 0.5, ROOM.z1 - 0.5);
+      want.y = clamp(want.y, 0.6, ROOM.h - 0.25);
+      if (!this.camPos) this.camPos = want.clone();
+      this.camPos.lerp(want, 1 - Math.exp(-9 * dt));
+      look = _v.set(0, 1.0, 0);
+      if (this.camera.fov !== 55) { this.camera.fov = 55; this.camera.updateProjectionMatrix(); }
     }
-    const cp = Math.cos(pitch);
-    const want = new THREE.Vector3(target.x + Math.sin(yaw) * cp * dist, target.y + Math.sin(pitch) * dist, target.z + Math.cos(yaw) * cp * dist);
-    // keep the camera inside the room
-    want.x = clamp(want.x, ROOM.x0 + 0.5, ROOM.x1 - 0.5);
-    want.z = clamp(want.z, ROOM.z0 + 0.5, ROOM.z1 - 0.5);
-    want.y = clamp(want.y, 0.6, ROOM.h - 0.25);
-    if (!this.camPos) this.camPos = want.clone();
-    this.camPos.lerp(want, 1 - Math.exp(-9 * dt));
-    this.shake = Math.max(0, this.shake - dt * 0.8);
+
     this.camera.position.copy(this.camPos);
     if (this.shake > 0) this.camera.position.add(new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(this.shake * 0.35));
-    this.camera.lookAt(target);
+    this.camera.lookAt(look);
   }
 }

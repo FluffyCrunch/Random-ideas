@@ -3,8 +3,10 @@ import * as CANNON from 'cannon-es';
 import { G, ROOM, MATS } from './constants.js';
 import { M, box, cyl, sph, at } from './gfx.js';
 
-// Where the cat starts, and where the owner drops it after catching it
-export const CAT_SPAWN = { x: -4.5, y: 0.95, z: -4.0 };
+// The cat's bed: where each round begins, and where the owner puts you back when you're caught.
+// There's open floor behind it, so the camera can start low and right behind the cat.
+export const CAT_SPAWN = { x: -1.8, y: 0.4, z: 1.4 };
+export const CAT_FACING = Math.PI / 2;     // facing east, toward the kitchen and dining table
 
 // A small walkway graph for the owner, drawn so every straight line between
 // two connected points clears the furniture
@@ -162,6 +164,14 @@ export function buildWorld(scene, physics) {
   deco(0, 0.06, 4.97, 14, 0.12, 0.06, bb, { cast: false });
   deco(-6.97, 0.06, 0, 0.06, 0.12, 10, bb, { cast: false });
   deco(6.97, 0.06, 0, 0.06, 0.12, 10, bb, { cast: false });
+
+  // the cat's bed
+  const bed = at(cyl(0.52, 0.52, 0.12, 0xe08aa6, 18), CAT_SPAWN.x, 0.06, CAT_SPAWN.z);
+  bed.castShadow = false;
+  scene.add(bed);
+  const bedIn = at(cyl(0.38, 0.38, 0.13, 0xf6d3dc, 18), CAT_SPAWN.x, 0.07, CAT_SPAWN.z);
+  bedIn.castShadow = false;
+  scene.add(bedIn);
 
   // rug
   const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.8, 2.5), new THREE.MeshStandardMaterial({ map: rugTexture(), roughness: 0.95 }));

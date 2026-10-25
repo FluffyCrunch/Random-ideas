@@ -2,36 +2,38 @@
 const rand = (a, b) => a + Math.random() * (b - a);
 const midi = n => 440 * Math.pow(2, (n - 69) / 12);
 
-// ---- the soundtrack: a mischievous tiptoe in D minor ----
-// Eight bars of eight swung steps. Everything is short and staccato, like a cat creeping along a shelf.
-const SWING = 0.2;                                       // odd steps are pushed late, which gives the bounce
-const BASS_ROOTS = [38, 38, 43, 45, 38, 46, 45, 38];     // Dm, Dm, Gm, A, Dm, Bb, A, Dm
-const BASS_PATTERNS = {
-  A: [0, null, 7, 0, null, 5, 3, null],
-  B: [0, 3, 5, 6, 7, null, 12, null],                    // a little chromatic climb: the sneak
-  C: [0, null, 7, 0, null, 5, 3, 2],
-};
-const BASS_BARS = ['A', 'A', 'A', 'B', 'A', 'A', 'C', 'B'];
-const CHORD_QUALITY = ['m', 'm', 'm', 'M', 'm', 'M', 'M', 'm'];
-// the marimba tune (midi notes, null = rest), one array per bar
-const MARIMBA = [
-  [null, null, 74, null, 77, null, 76, 74],
-  [null, 72, null, null, 69, null, null, null],
-  [null, null, 70, null, 74, null, 73, 70],
-  [69, null, null, 72, null, 76, null, 69],
-  [null, null, 74, null, 77, null, 76, 74],
-  [null, 70, null, null, 74, null, 70, null],
-  [73, null, 69, null, 76, null, 73, null],
-  [74, null, null, 69, null, null, 62, null],
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// ---- the soundtrack: a slow, soft, generative lullaby ----
+// Warm pads breathe under a gentle four-chord loop, and a few bell notes are picked fresh in every bar
+// from a calm pentatonic scale. Nothing is sharp or percussive, and the melody never repeats exactly,
+// so it stays pleasant however long you play.
+const BPM = 66;
+const CHORDS = [
+  { root: 48, tones: [60, 64, 67, 71] },   // C major 7
+  { root: 45, tones: [57, 60, 64, 67] },   // A minor 7
+  { root: 53, tones: [57, 60, 64, 65] },   // F major 7
+  { root: 55, tones: [59, 62, 64, 67] },   // G 6
 ];
-const STAB_BARS = [1, 3, 5, 7];                          // the string plucks answer the tune in these bars
+const BELL_NOTES = [67, 69, 72, 74, 76, 79, 81];      // C major pentatonic
+
+// a small seeded random number generator, so each bar's notes are random but repeatable
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export class Sound {
   constructor() {
     this.ctx = null;
     this.muted = false;
     this.tension = 0;         // 0..1, driven by how suspicious the owner is
-    this.music = { step: 0, next: 0 };
+    this.music = { step: 0, next: 0, plan: [], last: 3, seed: Math.floor(Math.random() * 1e6) };
     this.lastThud = 0;
   }
 
@@ -56,6 +58,26 @@ export class Sound {
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     this.music.next = c.currentTime + 0.1;
+    this.initMusicBuses();
+  }
+
+  // The bell notes go through a soft echo, which makes the music feel spacious and calm
+  initMusicBuses() {
+    const c = this.ctx;
+    this.bellBus = c.createGain();
+    this.bellBus.connect(this.musicBus);
+    const send = c.createGain(), delay = c.createDelay(2), feedback = c.createGain(), soften = c.createBiquadFilter();
+    send.gain.value = 0.5;
+    delay.delayTime.value = 0.54;
+    feedback.gain.value = 0.42;
+    soften.type = 'lowpass';
+    soften.frequency.value = 1800;
+    this.bellBus.connect(send);
+    send.connect(delay);
+    delay.connect(soften);
+    soften.connect(feedback);
+    feedback.connect(delay);
+    soften.connect(this.musicBus);
   }
 
   setMuted(m) {
@@ -161,12 +183,13 @@ export class Sound {
 
   gasp() { this.tone(240, 0.28, 'sawtooth', 0.05, 1.6); this.tone(360, 0.22, 'triangle', 0.05, 1.3, 0.04); }
   chime(i = 0) { this.tone(660 + i * 90, 0.3, 'triangle', 0.07, 1.0); this.tone((660 + i * 90) * 1.5, 0.25, 'sine', 0.04, 1.0, 0.05); }
-  click() { this.tone(620, 0.06, 'square', 0.04, 0.8); }
+  click() { this.tone(620, 0.07, 'sine', 0.05, 0.8); }
 
   caught() {
-    this.tone(150, 0.9, 'sawtooth', 0.09, 0.7);
-    this.tone(158, 0.9, 'sawtooth', 0.09, 0.7);
-    this.noise(0.4, 0.15, 900);
+    // a soft, sinking "oh no" rather than a harsh buzz
+    this.tone(392, 0.5, 'sine', 0.12, 0.7);
+    this.tone(294, 0.7, 'sine', 0.1, 0.7, 0.18);
+    this.noise(0.3, 0.08, 700);
   }
 
   purr(dur = 3) {
@@ -190,59 +213,90 @@ export class Sound {
   }
 
   win() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.45, 'triangle', 0.09, 1.0, i * 0.13)); }
-  lose() { [392, 330, 262].forEach((f, i) => this.tone(f, 0.55, 'sawtooth', 0.07, 0.85, i * 0.22)); }
+  lose() { [392, 330, 262].forEach((f, i) => this.tone(f, 0.6, 'triangle', 0.08, 0.9, i * 0.25)); }
 
   // ---- music ----
-  // One step of the soundtrack. `t` is when it should sound; `stepDur` is how long a step lasts.
+  // A warm, slow-breathing chord: soft sine and triangle waves that fade in and out over seconds
+  pad(notes, dur, off) {
+    const c = this.ctx, t = c.currentTime + off;
+    const lp = c.createBiquadFilter(), g = c.createGain();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.05, t + 1.8);
+    g.gain.setValueAtTime(0.05, t + dur - 0.3);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur + 2.2);
+    lp.connect(g).connect(this.musicBus);
+    for (const n of notes) {
+      for (const [type, detune, level] of [['sine', -4, 0.5], ['triangle', 5, 0.22]]) {
+        const o = c.createOscillator(), og = c.createGain();
+        o.type = type;
+        o.frequency.value = midi(n);
+        o.detune.value = detune;
+        og.gain.value = level;
+        o.connect(og).connect(lp);
+        o.start(t);
+        o.stop(t + dur + 2.4);
+      }
+    }
+  }
+
+  // A long, gentle note with a slow fade in (used for the bass)
+  soft(freq, dur, vol, off, attack = 0.4) {
+    const c = this.ctx, t = c.currentTime + off, o = c.createOscillator(), g = c.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.musicBus);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  // A soft bell: a pure tone with a long tail and a faint overtone, sent through the echo
+  bell(n, off, vol) {
+    const f = midi(n);
+    this.tone(f, 1.7, 'sine', vol, 0.9995, off, this.bellBus);
+    this.tone(f * 2, 0.7, 'sine', vol * 0.25, 0.999, off, this.bellBus);
+    this.tone(f * 3.01, 0.25, 'sine', vol * 0.06, 0.999, off, this.bellBus);
+  }
+
+  // One step (an eighth note) of the soundtrack. `t` is when it should sound.
   step(s, t, stepDur) {
-    const bar = Math.floor(s / 8) % 8, i = s % 8;
-    const bus = this.musicBus;
-    const off = t + (i % 2 ? stepDur * SWING : 0) - this.ctx.currentTime;   // swing the off-beats
-    const root = BASS_ROOTS[bar];
+    const bar = Math.floor(s / 8), i = s % 8;
+    const chord = CHORDS[Math.floor(bar / 2) % CHORDS.length];
+    const off = t - this.ctx.currentTime;
+    const M = this.music;
 
-    // pizzicato bass: short plucks with a bit of octave on top so small speakers can hear it
-    const n = BASS_PATTERNS[BASS_BARS[bar]][i];
-    if (n !== null) {
-      this.tone(midi(root + n), 0.2, 'triangle', 0.28, 0.96, off, bus);
-      this.tone(midi(root + n + 12), 0.1, 'sine', 0.07, 0.98, off, bus);
+    // every two bars a new chord blooms, with a soft bass note held underneath
+    if (i === 0 && bar % 2 === 0) {
+      this.pad(chord.tones, stepDur * 16, off);
+      this.soft(midi(chord.root), stepDur * 16, 0.13, off, 0.6);
+      this.soft(midi(chord.root + 12), stepDur * 14, 0.04, off, 0.8);
     }
 
-    // marimba: a soft bell-like tap plus a quick overtone
-    const m = MARIMBA[bar][i];
-    if (m) {
-      this.tone(midi(m), 0.3, 'sine', 0.15, 0.995, off, bus);
-      this.tone(midi(m) * 3.97, 0.07, 'sine', 0.045, 0.99, off, bus);
+    // each bar, pick a few bell notes at random, wandering up or down the scale in small steps
+    if (i === 0) {
+      const rng = seeded(bar * 7919 + M.seed);
+      M.plan = new Array(8).fill(null);
+      for (const slot of [0, 2, 3, 4, 6]) {
+        if (rng() < 0.5) {
+          M.last = clamp(M.last + Math.round((rng() - 0.5) * 4), 0, BELL_NOTES.length - 1);
+          M.plan[slot] = BELL_NOTES[M.last];
+        }
+      }
     }
+    if (M.plan[i]) this.bell(M.plan[i], off, 0.07);
 
-    // string plucks on the off-beats, answering the tune
-    if (STAB_BARS.includes(bar) && (i === 3 || i === 7)) {
-      const r = root + 24, third = CHORD_QUALITY[bar] === 'm' ? 3 : 4;
-      [r, r + third, r + 7].forEach(p => this.tone(midi(p), 0.1, 'square', 0.035, 0.97, off, bus));
-    }
-
-    // woodblock taps for the tiptoeing
-    if (i === 0 || i === 4) { this.noise(0.03, 0.09, 1800, 'bandpass', off, bus); this.tone(880, 0.03, 'square', 0.03, 0.8, off, bus); }
-    if (i === 2 || i === 6) this.noise(0.035, 0.02, 7000, 'highpass', off, bus);
-
-    // a cartoon boing to wrap up the phrase
-    if (bar === 7 && i === 7) this.tone(260, 0.24, 'sine', 0.1, 3.2, off, bus);
-
-    // when the owner gets suspicious: clashing strings creep in and a heartbeat starts
-    if (this.tension > 0.2 && i === 0) {
-      const v = this.tension * 0.05;
-      this.tone(midi(62), 1.6, 'sawtooth', v, 1.0, off, bus);
-      this.tone(midi(63), 1.6, 'sawtooth', v, 1.0, off, bus);
-    }
-    if (this.tension > 0.6 && (i === 0 || i === 3)) {
-      this.tone(110, 0.18, 'sine', 0.22, 0.4, off, bus);
-      this.noise(0.05, 0.05, 300, 'lowpass', off, bus);
-    }
+    // when the owner is on to you, a slow, soft heartbeat: a hint of tension, nothing harsh
+    if (this.tension > 0.45 && (i === 0 || i === 3)) this.tone(80, 0.22, 'sine', 0.12 * this.tension, 0.5, off, this.musicBus);
   }
 
   update(playing) {
     if (!this.ctx) return;
     const c = this.ctx, now = c.currentTime;
-    const stepDur = 60 / (104 + this.tension * 22) / 2;     // it speeds up when the owner is on to you
+    const stepDur = 60 / (BPM + this.tension * 6) / 2;       // barely quickens when the owner is suspicious
     if (this.music.next < now - 0.5) this.music.next = now + 0.05;
     while (this.music.next < now + 0.15) {
       this.step(this.music.step, this.music.next, stepDur);

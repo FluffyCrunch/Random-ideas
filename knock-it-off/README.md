@@ -16,11 +16,11 @@ This one is a proper game-dev project, not a single HTML file: **Three.js** for 
 | <kbd>F</kbd> or <kbd>E</kbd> | Swat whatever is in front of you |
 | <kbd>C</kbd> (hold) | Sit and look innocent |
 | <kbd>Q</kbd> | Meow, to lure your human over |
-| Move the mouse | Turn the camera toward the cursor (no clicking or dragging) |
+| Move the mouse | Look around: the camera turns by however far you move the mouse |
 | Mouse wheel | Zoom the camera in and out |
 | <kbd>Esc</kbd> / <kbd>M</kbd> | Pause / sound on and off |
 
-**The camera follows your cursor.** Move it to the right of the screen and the view turns right, move it up and you look up. A small calm zone in the middle (the dashed circle) keeps the view still, and the further toward the edge you go, the faster it turns. Everything the cat does is on the keyboard, so you never need to click. The arrow keys also turn the camera if you prefer them.
+**The camera works like a normal third-person game.** It starts low and close right behind the cat, at about the height of a cat's eyes, and it turns as you move the mouse: move right to look right, up to look up, and a faster flick turns it faster. It won't flip to a top-down view, and it moves in closer whenever a wall or shelf gets in the way. The game asks your browser to capture the mouse when a round starts (press <kbd>Esc</kbd> to release it, which also pauses); if the browser doesn't allow that, the camera still follows your mouse movements. Everything the cat does is on the keyboard, so you never need to click. The arrow keys also turn the camera.
 
 **Tips**
 - Things break when they hit something hard enough. Light items like mugs shatter from a short fall; plants and laptops need a longer drop.
@@ -51,7 +51,7 @@ A few details worth knowing:
 
 ## Music
 
-The soundtrack is a mischievous tiptoe in D minor, generated live in the browser: a springy pizzicato bass, a bouncy marimba tune, plucked strings answering on the off-beats, woodblock taps and a cartoon boing at the end of each phrase, all swung so it bounces. When your human gets suspicious, the tempo climbs, clashing strings creep in, and once they're chasing you a heartbeat starts.
+The soundtrack is a slow, soft lullaby that's generated live in the browser: warm pads breathe under a gentle four-chord loop, and a few bell notes are picked fresh in every bar from a calm scale, with a soft echo behind them. There's nothing sharp or percussive, and the melody never repeats exactly, so it stays easy to listen to however long you play. When your human gets suspicious, a slow heartbeat fades in underneath.
 
 ## Run it locally
 
