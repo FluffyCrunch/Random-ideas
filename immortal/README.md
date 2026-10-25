@@ -52,7 +52,7 @@ What Mantis says at the end depends on how many times you died, and she quotes y
 | P or Esc | II | Pause |
 | M | | Sound on or off |
 
-Cutscenes play by themselves and ignore every key and click, so you can't skip one by accident. To skip, **hold Esc for 5 seconds** (on touch, hold the II button).
+Cutscenes play by themselves and ignore every key and click, so you can't skip one by accident. To skip, **hold Esc for 2 seconds** (on touch, hold the II button).
 
 ## It's hard on purpose
 

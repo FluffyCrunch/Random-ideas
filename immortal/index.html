@@ -1164,14 +1164,14 @@ function updateCine(dt) {
     cine.chars = Math.min(cine.text.length, cine.chars + dt * 34);
     if (Math.floor(cine.chars) > before && before % 2 === 0) sfx.tick();
   }
-  // Cutscenes play like a film: no key or click advances them. Holding Esc for 5s skips.
+  // Cutscenes play like a film: no key or click advances them. Holding Esc for 2s skips.
   if (holdToSkip(dt)) { skipScene(); return; }
   const typed = !cine.text || cine.chars >= cine.text.length;
   const need = s.dur ?? (cine.text ? 1.8 + cine.text.length * 0.055 : 2);
   if (typed && cine.t >= need && (!s.until || s.until())) nextShot();
 }
 
-const SKIP_HOLD = 5;
+const SKIP_HOLD = 2;
 let skipHold = 0;
 function holdToSkip(dt) {
   skipHold = keys.pause ? skipHold + dt : 0;
