@@ -57,7 +57,7 @@ Cutscenes play by themselves and ignore every key and click, so you can't skip o
 ## It's hard on purpose
 
 - Enemies **surround you**, and up to three can attack at once.
-- **No stun-locking.** Enemies stagger from your first hits, but keep hitting the same one (three in a row, two for throwers and brutes) and it shrugs you off and **counters**.
+- **No stun-locking.** Every hit fills an enemy's poise (heavy hits fill it faster), and it drains again if you back off. Fill it and the enemy stops flinching, **lunges back at you and counters**, harder and with more reach than a normal swing. Spamming heavy attacks will get you punished.
 - **Hornet never flinches.** Your hits hurt him, but they won't stop whatever attack he's in the middle of.
 - An enemy that **glows** with a **!** above it is about to strike. Watch for it.
 - **Perfect dodge:** roll just as an attack lands to slow time and stun the attacker.
@@ -79,7 +79,7 @@ Talk to the old woman and she gives Orans a blade. From then on he fights with a
 ## How it's made
 
 - One HTML file with no images or audio files. Everything is drawn on a `<canvas>` and every sound is made with the Web Audio API.
-- The soundtrack is generated live by a small step sequencer: string pads, piano-like plucks, bells, bass, a singing lead and drums. Each place has its own piece and they crossfade as you travel: a lonely Outskirts, a restless Market, an aching Bridge, a Tower with a heartbeat. Hornet gets a proud, tragic theme in D harmonic minor that speeds up for his second form.
+- The soundtrack is generated live by a small step sequencer: string pads, piano-like plucks, bells, bass, a singing lead and drums. Each place has its own piece and they crossfade as you travel: a lonely Outskirts, a restless Market, an aching Bridge, a Tower with a heartbeat. When a fight starts, each one switches to a faster fight version with drums and a driving bass. Hornet gets a proud, tragic theme in D harmonic minor that speeds up for his second form.
 - The fighters are full-bodied silhouettes built from tapered limbs on a jointed skeleton, so every animation is generated in code. Each figure is drawn twice: once in light and nudged toward the moon, then in black on top, which leaves a thin rim of moonlight along its edge.
 - The cutscene faces are drawn in code too, in a manga style: screentone shading, expressive eyes with highlights, and mouths that move while a character is talking.
 - The noir look comes from a strict black-and-white palette, parallax layers, rain, film grain and a vignette.

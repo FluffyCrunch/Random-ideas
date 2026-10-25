@@ -243,7 +243,7 @@ function toggleMute() {
 // =====================================================================
 //  Music: a small step sequencer, one track per place, crossfaded
 // =====================================================================
-const MUSIC_VOL = 0.38;
+const MUSIC_VOL = 0.55;
 const midi = n => 440 * Math.pow(2, (n - 69) / 12);
 
 // Each bar is one chord, split into 8 steps. Lead notes are [step, midi note, length in steps].
@@ -310,6 +310,21 @@ const TRACKS = {
     lead: [[0, 74, 8], [8, 74, 4], [12, 72, 4], [16, 70, 8], [24, 69, 8]], leadVol: 0.03,
   },
 };
+
+// Each area also gets a fight version: same chords and melody, but faster,
+// with drums and a driving bass. It plays while a normal fight is on.
+for (const zone of ['outskirts', 'market', 'bridge', 'tower']) {
+  const T = TRACKS[zone];
+  TRACKS[zone + 'Fight'] = {
+    ...T,
+    bpm: Math.round(T.bpm * 1.3),
+    drone: null,
+    bass: { steps: [0, 2, 3, 4, 6, 7], pattern: [0, 0, 12, 0, 0, 12], vol: 0.085, len: 1 },
+    arp: { voice: 'pluck', steps: [0, 1, 2, 3, 4, 5, 6, 7], pattern: [0, 1, 2, 1, 0, 2, 1, 2], octave: 12, vol: 0.05 },
+    drums: { kick: [0, 3, 4], snare: [2, 6], hat: [0, 1, 2, 3, 4, 5, 6, 7], vol: 0.9 },
+    leadVol: (T.leadVol || 0.03) * 1.3,
+  };
+}
 
 // Envelope: fade in over `a`, hold, then fade out by `t + dur`
 function env(g, t, a, peak, dur) {
@@ -437,7 +452,9 @@ function desiredTrack() {
   if (game.state === 'title' || game.state === 'intro' || game.state === 'final') return 'lament';
   if (game.state === 'cine' && cine.name === 'finale') return 'finale';
   if (bossRef && !bossRef.dead) return bossRef.phase2 ? 'boss2' : 'boss';
-  return ['outskirts', 'market', 'bridge', 'tower'][Math.max(0, game.zoneIdx)];
+  const zone = ['outskirts', 'market', 'bridge', 'tower'][Math.max(0, game.zoneIdx)];
+  // Fight music while a normal fight is on (the arena is locked)
+  return game.arena && game.state !== 'cine' ? zone + 'Fight' : zone;
 }
 
 function updateMusic() {
@@ -746,28 +763,32 @@ function damageEnemy(e, dmg, a) {
   // Hornet takes the damage but never flinches: whatever he was doing, he keeps doing it
   if (e.T.boss) { e.kbv *= 0.25; return; }
   if (!e.T.armor || a.stagger) {
-    // Hits close together build up; once enough land, the enemy stops flinching and hits back
-    e.streak = game.t - (e.lastHitT ?? -9) < 1.2 ? (e.streak || 0) + 1 : 1;
-    e.lastHitT = game.t;
+    // Every hit fills the enemy's "poise" meter (heavy hits count extra). It drains slowly
+    // when they're left alone; once it fills, they stop flinching and lunge back at you.
     if (e.armored) { e.kbv *= 0.2; return; }
-    if (e.streak >= (POISE[e.type] || 3)) { counterAttack(e); return; }
+    e.poise = (e.poise || 0) + (a.stagger ? 1.5 : 1);
+    if (e.poise >= (POISE[e.type] || 3)) { counterAttack(e); return; }
     if (e.T.shield && a.stagger) popText(e.x, e.y - e.T.h - 34, 'BREAK', true);
     e.state = 'hurt'; e.t = 0;
-    e.stagger = e.T.shield && a.stagger ? 0.8 : a.stagger ? 0.45 : 0.26;
+    e.stagger = e.T.shield && a.stagger ? 0.8 : a.stagger ? 0.45 : 0.3;
   }
 }
 
-// How many hits in a row an enemy takes before it shrugs them off and strikes back
+// How much punishment an enemy takes before it shrugs it off and strikes back
 const POISE = { grunt: 3, thrower: 2, guard: 3, brute: 2 };
+const POISE_DRAIN = 0.6;   // per second, while they aren't being hit
 
 function counterAttack(e) {
   e.armored = true;
-  e.streak = 0;
-  e.kbv *= 0.2;
+  e.counter = true;
+  e.poise = 0;
+  e.kbv *= 0.15;
   e.face = Math.sign(player.x - e.x) || e.face;
   e.hitsLeft = 1;
   popText(e.x, e.y - e.T.h - 34, 'COUNTER', true);
-  startWindup(e, e.T.ranged ? 'throw' : e.type === 'brute' ? 'slam' : 'melee', 0.22);
+  ring(e.x, e.y - e.T.h * 0.6);
+  sfx.block();
+  startWindup(e, e.T.ranged ? 'throw' : e.type === 'brute' ? 'slam' : 'melee', 0.24);
 }
 
 // At half health Hornet drops to one knee, and a cutscene shows his second form
@@ -819,7 +840,7 @@ function hurtPlayer(dmg, dir, src) {
       popText(p.x, p.y - 160, 'PERFECT', true);
       ring(p.x, p.y - 70);
       sfx.parry();
-      if (src && !src.dead && !src.T.boss) { src.state = 'hurt'; src.t = 0; src.stagger = 0.8; src.armored = false; }
+      if (src && !src.dead && !src.T.boss) { src.state = 'hurt'; src.t = 0; src.stagger = 0.8; src.armored = false; src.counter = false; }
     }
     return false;
   }
@@ -888,8 +909,10 @@ function throwKnife(e) {
 function meleeStrike(e, dist) {
   const p = player, T = e.T;
   const inFront = Math.sign(p.x - e.x) === e.face || dist < 24;
-  const mult = T.boss && e.kind === 'melee' ? 0.6 : 1;
-  if (inFront && dist <= T.range + 22 && p.y > GROUND - 80) hurtPlayer(T.dmg * mult, e.face, e);
+  // A counter reaches further and hits harder than a normal swing
+  const mult = (T.boss && e.kind === 'melee' ? 0.6 : 1) * (e.counter ? 1.25 : 1);
+  const reach = T.range + 22 + (e.counter ? 45 : 0);
+  if (inFront && dist <= reach && p.y > GROUND - 80) hurtPlayer(T.dmg * mult, e.face, e);
   // In his second form, the last hit of Hornet's combo also shakes the ground
   if (e.kind === 'slam' || (T.boss && e.phase2 && e.kind === 'melee' && e.hitsLeft <= 1)) {
     // Ground shockwaves roll out both ways: jump or roll over them
@@ -916,6 +939,7 @@ function updateEnemy(e, dt) {
   const haste = e.phase2 ? 0.75 : 1;
   e.cd -= dt;
   e.t += dt;
+  if (e.state !== 'hurt') e.poise = Math.max(0, (e.poise || 0) - POISE_DRAIN * dt);
   let vx = 0;
 
   switch (e.state) {
@@ -956,6 +980,12 @@ function updateEnemy(e, dt) {
       break;
     }
     case 'windup':
+      // A counter lunges in so it can't be dodged just by having knocked them back
+      if (e.counter && !T.ranged) {
+        e.face = dir;
+        const gap = dist - T.range * 0.6;
+        if (gap > 0) vx = e.face * Math.min(520, gap * 9);
+      }
       if (e.t >= e.wind) {
         e.state = 'attack'; e.t = 0; e.hitDone = false;
         if (e.kind === 'throw') throwKnife(e);
@@ -997,7 +1027,7 @@ function updateEnemy(e, dt) {
       if (e.kind !== 'throw' && !e.hitDone) { e.hitDone = true; meleeStrike(e, dist); }
       if (e.t >= 0.18) {
         if (e.hitsLeft > 1) { e.hitsLeft--; startWindup(e, e.kind, (e.kind === 'throw' ? 0.24 : 0.2) * haste); }
-        else { e.state = 'recover'; e.t = 0; e.armored = false; }
+        else { e.state = 'recover'; e.t = 0; e.armored = false; e.counter = false; }
       }
       break;
     case 'recover':
@@ -2657,6 +2687,18 @@ const P = {
   },
   air: () => ({ lean: 0.1, armF: [2.2, 0.6], armB: [1.8, 0.8], legF: [0.9, -1.4], legB: [0.1, -0.9] }),
   hurt: () => ({ lean: -0.35, head: -0.3, armF: [-0.6, 0.4], armB: [-0.9, 0.6], legF: [0.3, -0.2], legB: [-0.3, -0.1] }),
+  // A real flinch: the head snaps back fast, the body stumbles, then slowly recovers.
+  // k runs 0..1 over the stagger; heavy hits make it bigger.
+  flinch: (k, big = false) => {
+    const r = k < 0.2 ? ease(k / 0.2) : 1 - ease((k - 0.2) / 0.8);
+    const s = big ? 1.35 : 1;
+    const step = Math.sin(Math.min(1, k * 1.6) * Math.PI) * 0.35 * s;   // one stumbling step back
+    return {
+      lean: -0.34 * r * s, head: -0.5 * r * s, bob: 8 * r * s,
+      armF: [lerp(0.5, -0.7, r * s), lerp(1.9, 0.8, r)], armB: [lerp(0.3, -1.0, r * s), lerp(2.1, 1.0, r)],
+      legF: [0.3 + step, -0.25 - 0.6 * r], legB: [-0.3 - step, -0.15 - 0.45 * r],
+    };
+  },
   limp: () => ({ lean: 0, armF: [0.3, 0.2], armB: [-0.3, 0.3], legF: [0.1, -0.05], legB: [-0.1, -0.05] }),
   tuck: () => ({ lean: 0.4, bob: 26, armF: [1.4, 1.6], armB: [1.2, 1.8], legF: [1.6, -2.4], legB: [1.3, -2.2] }),
   crouch: () => ({ lean: 0.45, bob: 22, head: 0.2, armF: [1.0, 1.4], armB: [0.8, 1.6], legF: [0.9, -1.6], legB: [-0.1, -1.3] }),
@@ -2714,7 +2756,7 @@ function playerPose(p) {
       return { lean: lerp(-0.25, 0.5, k), armF: [lerp(3.0, 1.2, k), lerp(0.3, 0, k)], armB: [lerp(2.8, 1.0, k), 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
     }
     case 'dodge': return dodgePose(p.t);
-    case 'hurt': return P.hurt();
+    case 'hurt': return P.flinch(Math.min(1, p.t / 0.32), true);
     case 'dying': case 'fallen': return { ...P.limp(), rot: -Math.PI / 2 * Math.min(1, p.t / 0.4) };
   }
   if (!p.onGround) return P.air();
@@ -2741,7 +2783,7 @@ function enemyPose(e) {
     if (e.kind === 'slam') return { lean: 0.45, armF: [1.0, 0], armB: [0.9, 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
     return { lean: 0.3, armF: [1.6, 0], armB: [0.3, 2.0], legF: [0.45, -0.15], legB: [-0.35, -0.05] };
   }
-  if (e.state === 'hurt') return P.hurt();
+  if (e.state === 'hurt') return P.flinch(Math.min(1, e.t / (e.stagger || 0.3)), e.stagger >= 0.45);
   if (e.state === 'kneel') return { ...P.kneel(), head: 0.55, lean: 0.4, armF: [0.3, 0.4], armB: [-0.1, 0.4] };
   if (e.state === 'transform') {
     // Roaring, arms thrown wide
