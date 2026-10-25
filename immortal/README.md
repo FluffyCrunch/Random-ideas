@@ -37,7 +37,7 @@ Along the way, Orans meets people who want a word. A **…** appears over them; 
 - **The stranger:** a gaunt man chained to the bridge, who seems to know exactly how this road ends.
 - **The tower:** Orans finally reaches her.
 
-What Mantis says at the end depends on how many times you died, and she quotes your real final stats back at you.
+At the top of the tower waits **Hornet, the Warden**, who gets the full villain treatment: an entrance scene with his own anime title card, a cutscene when he transforms at half health, and last words when he falls. Beat him, and Orans finally reaches Mantis.
 
 ## How to play
 

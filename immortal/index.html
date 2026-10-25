@@ -521,8 +521,12 @@ function damageEnemy(e, dmg, a) {
   popText(e.x, e.y - e.T.h - 12, dmg < 10 ? dmg.toFixed(1) : String(Math.round(dmg)));
   burst(e.x - dir * 10, e.y - e.T.h * 0.6, a.stagger ? 14 : 8);
   sfx.hit(a.stagger);
-  if (e.hp <= 0) { killEnemy(e, dir); return; }
-  if (e.T.boss && !e.phase2 && e.hp < e.T.hp / 2) { startPhaseTwo(e); return; }
+  if (e.hp <= 0) {
+    if (e.T.boss && !e.defeated) bossDefeated(e);
+    else killEnemy(e, dir);
+    return;
+  }
+  if (e.T.boss && !e.phase2Started && e.hp < e.T.hp / 2) { startPhaseTwo(e); return; }
   if (!e.T.armor || a.stagger) {
     if (e.T.shield && a.stagger) popText(e.x, e.y - e.T.h - 34, 'BREAK', true);
     e.state = 'hurt'; e.t = 0;
@@ -530,19 +534,27 @@ function damageEnemy(e, dmg, a) {
   }
 }
 
-// At half health Hornet roars, sprouts wings and comes back faster with a diving attack
+// At half health Hornet drops to one knee, and a cutscene shows his second form
 function startPhaseTwo(e) {
+  e.phase2Started = true;
+  e.state = 'kneel'; e.t = 0; e.kbv = 0;
+  playScene('hornetPhase2');
+}
+function becomeSecondForm() {
+  const e = bossRef;
+  if (!e || e.phase2) return;
   e.phase2 = true;
-  e.state = 'transform'; e.t = 0; e.kbv = 0;
-  say(e, 'Enough. Let me show you what she made of me.', 3.2);
-  showBanner('HORNET AWAKENS', 'second form');
+  e.state = 'transform'; e.t = 0;
   game.shake = 16;
-  game.slowmo = 0.5;
   sfx.rumble();
   ring(e.x, e.y - 120);
-  const away = Math.sign(player.x - e.x) || 1;
-  player.vx = away * 520;
-  projectiles = [];
+}
+// When his health runs out he doesn't just drop: he gets a death scene
+function bossDefeated(e) {
+  e.defeated = true;
+  e.hp = 0; e.state = 'kneel'; e.kbv = 0;
+  game.slowmo = 0;
+  playScene('hornetDeath');
 }
 
 function killEnemy(e, dir) {
@@ -722,6 +734,8 @@ function updateEnemy(e, dt) {
     case 'transform':
       if (e.t >= 1.6) { e.state = 'approach'; e.t = 0; e.cd = 0.3; }
       break;
+    case 'kneel':
+      break;
     case 'attack':
       if (e.kind === 'dive') {
         e.vy += GRAV * 1.1 * dt;
@@ -810,7 +824,16 @@ function startEncounter(enc) {
 function spawnWave(list) {
   const a = game.arena;
   const isBoss = list.includes('warden');
-  let side = isBoss ? 1 : Math.random() < 0.5 ? -1 : 1;
+  if (isBoss) {
+    // Hornet is already waiting in front of the tower, and gets an entrance scene
+    const e = makeEnemy('warden', Math.min(a.left + VW * 0.72, MANTIS_X - 160));
+    e.face = -1; e.side = 1; e.entering = false;
+    enemies.push(e);
+    bossRef = e;
+    playScene('hornetIntro');
+    return;
+  }
+  let side = Math.random() < 0.5 ? -1 : 1;
   list.forEach((type, i) => {
     const x = side < 0 ? a.left - 40 - i * 40 : a.left + VW + 40 + i * 40;
     const e = makeEnemy(type, x);
@@ -819,12 +842,7 @@ function spawnWave(list) {
     enemies.push(e);
     side *= -1;
   });
-  if (isBoss) {
-    bossRef = enemies.find(e => e.type === 'warden' && !e.dead);
-    say(bossRef, "She said you'd come. She said to make it hurt.", 3.5);
-    say(mantis, 'Orans! Save me!', 3);
-    showBanner('HORNET', 'the warden of the tower');
-  } else if (Math.random() < 0.75) {
+  if (Math.random() < 0.75) {
     const talker = enemies[enemies.length - 1];
     const pool = game.deaths > 0 && Math.random() < 0.6 ? TAUNTS.after : TAUNTS.any;
     say(talker, pick(pool));
@@ -966,7 +984,7 @@ function beginPlay() { game.state = 'play'; clearInput(); sfx.start(); }
 // =====================================================================
 //  Cutscenes: anime / manga style shots
 // =====================================================================
-const NAME = { orans: 'ORANS', mantis: 'MANTIS', henchman: 'HENCHMAN', oracle: 'OLD WOMAN', ghost: 'STRANGER' };
+const NAME = { orans: 'ORANS', mantis: 'MANTIS', henchman: 'HENCHMAN', oracle: 'OLD WOMAN', ghost: 'STRANGER', hornet: 'HORNET' };
 const L = (who, text) => ({ who: NAME[who], text });
 const WIDE = (o = {}) => ({ kind: 'wide', zoom: 0.012, ...o });
 const FACE = (who, expr, o = {}) => ({ kind: 'face', who, expr, ...o });
@@ -974,6 +992,7 @@ const EYES = (who, expr, o = {}) => ({ kind: 'eyes', who, expr, zoom: 0.035, ...
 const SPLIT = (left, right, o = {}) => ({ kind: 'split', left, right, ...o });
 const IMPACT = (text, o = {}) => ({ kind: 'impact', text, dur: 0.9, zoom: 0, ...o });
 const ITEM = (title, sub, o = {}) => ({ kind: 'item', title, sub, dur: 3.2, zoom: 0.015, sfx: 'shing', ...o });
+const TITLECARD = (name, sub, o = {}) => ({ kind: 'titlecard', name, sub, dur: 2.6, zoom: 0.02, sfx: 'sting', ...o });
 
 function walkOn(dt) { player.face = 1; player.vx = 130; player.x = Math.min(player.x + 130 * dt, MANTIS_X - 80); }
 function walkToMantis(dt) {
@@ -1028,33 +1047,56 @@ const SCENES = {
     ];
   },
 
-  finale: () => {
-    const d = game.deaths, p = player;
-    return [
-      WIDE({ update: walkToMantis, until: () => player.vx === 0, dur: 1.2 }),
-      FACE('orans', 'soft', { side: 'right', line: L('orans', "Mantis! I'm here. It's over.") }),
-      FACE('mantis', 'downcast', { side: 'left', bg: 'rain', line: L('mantis', '...You came.') }),
-      FACE('mantis', 'soft', { line: L('mantis', d === 0 ? 'Not a single death? How... impressive.' : `Of course you came. ${d} ${d === 1 ? 'death' : 'deaths'}, and you still came.`) }),
-      FACE('orans', 'smile', { side: 'right', line: L('orans', "Let's go home.") }),
-      WIDE({ dur: 2.2, enter: () => { mantis.state = 'stand'; mantis.t = 0; burst(MANTIS_X, GROUND - 70, 14, 220); sfx.rope(); } }),
-      EYES('mantis', 'reveal', { bg: 'focus', sfx: 'sting', line: L('mantis', 'Home?') }),
-      FACE('mantis', 'sinister', { bg: 'dark', line: L('mantis', 'Orans... who do you think hired them?') }),
-      FACE('orans', 'shock', { bg: 'focus', shake: 8, line: L('orans', '...What?') }),
-      FACE('mantis', 'sinister', { bg: 'dark', side: 'left', line: L('mantis', "You can't be killed. Believe me, I tried.") }),
-      FACE('mantis', 'reveal', { bg: 'speed', line: L('mantis', d === 0
-        ? 'So I sent an army to wear you down. You were supposed to break.'
-        : 'So I let them kill you. Again and again. And every time, you came back a little weaker.') }),
-      SPLIT({ who: 'orans', expr: 'pained' }, { who: 'mantis', expr: 'sinister', bg: 'dark' }, { line: L('mantis', d === 0
-        ? "Doesn't matter. I'll do it myself."
-        : `Look at you. ${Math.ceil(p.maxHp)} HP. ${p.dmg.toFixed(1)} damage. Barely a man.`) }),
-      FACE('mantis', 'sinister', { bg: 'dark', scale: 1.95, zoom: 0.05, line: L('mantis', 'Did you know, darling?') }),
-      EYES('mantis', 'reveal', { bg: 'focus', shake: 4, line: L('mantis', 'The female praying mantis... eats her mate.') }),
-      WIDE({ dur: 2.0, zoom: 0.04, enter: () => { mantis.state = 'pray'; mantis.t = 0; game.shake = 6; sfx.rumble(); } }),
-      IMPACT('SHNK!!', { enter: mantisStrike }),
-      FACE('orans', 'dying', { bg: 'flash', close: true, dur: 2.6, line: L('orans', '...Mantis...') }),
-      WIDE({ dur: 3.4, zoom: -0.02, enter: () => { mantis.state = 'pray'; } }),
-    ];
-  },
+  // Hornet should feel like the main villain, right up until he isn't
+  hornetIntro: () => [
+    WIDE({ dur: 2.8, line: L('mantis', 'Orans! Help me!') }),
+    FACE('hornet', 'hNeutral', { bg: 'tone', line: L('hornet', 'So. The one who refuses to stay dead.') }),
+    FACE('orans', 'determined', { side: 'right', line: L('orans', 'Let her go.') }),
+    FACE('hornet', 'hNeutral', { bg: 'tone', side: 'left', line: L('hornet', 'Let her go? Look closer, boy. Nobody is holding her.') }),
+    EYES('hornet', 'hAngry', { bg: 'focus', sfx: 'sting', line: L('hornet', "I've buried better men than you on this tower. Some of them more than once.") }),
+    FACE('orans', 'angry', { bg: 'speed', shake: 8, line: L('orans', "Then I'll bury you first!") }),
+    TITLECARD('HORNET', 'THE WARDEN OF THE TOWER'),
+  ],
+
+  hornetPhase2: () => [
+    WIDE({ dur: 2.2, enter: () => { game.shake = 8; sfx.thud(); } }),
+    FACE('hornet', 'cracked', { bg: 'rain', line: L('hornet', "Heh... She told me you'd be weaker by now.") }),
+    FACE('orans', 'shock', { bg: 'focus', shake: 6, side: 'right', line: L('orans', '...She told you?') }),
+    EYES('hornet', 'cracked', { bg: 'focus', line: L('hornet', 'Enough talk. Let me show you what she made of me.') }),
+    IMPACT('BZZZT!!', { enter: becomeSecondForm }),
+    TITLECARD('HORNET', 'SECOND FORM'),
+    WIDE({ dur: 1.8, zoom: 0.03 }),
+  ],
+
+  hornetDeath: () => [
+    WIDE({ dur: 2.4, zoom: 0.02, enter: () => { game.shake = 10; sfx.thud(); } }),
+    FACE('hornet', 'hDying', { bg: 'rain', line: L('hornet', "Heh... So this is what's left of you. Enough, it seems.") }),
+    FACE('orans', 'pained', { side: 'right', line: L('orans', "It's over. Where is she?") }),
+    FACE('hornet', 'hDying', { bg: 'rain', side: 'left', line: L('hornet', "Over...? Boy... it hasn't even started.") }),
+    EYES('hornet', 'hDying', { bg: 'rain', line: L('hornet', "Go on. She's waiting. She always waits...") }),
+    WIDE({ dur: 2.8, enter: () => { const e = bossRef; if (e && !e.dead) killEnemy(e, Math.sign(e.x - player.x) || 1); sfx.thud(); } }),
+  ],
+
+  // Finale dialogue written by Shifa
+  finale: () => [
+    WIDE({ update: walkToMantis, until: () => player.vx === 0, dur: 1.2 }),
+    FACE('orans', 'smile', { side: 'right', line: L('orans', "We're safe now. Come, let's go.") }),
+    FACE('mantis', 'downcast', { side: 'left', bg: 'rain', line: L('mantis', "Orans... I fear we can't.") }),
+    FACE('orans', 'neutral', { side: 'right', line: L('orans', 'Why?') }),
+    FACE('mantis', 'downcast', { side: 'left', bg: 'rain', line: L('mantis', "The danger isn't over yet.") }),
+    FACE('orans', 'shock', { bg: 'focus', shake: 6, line: L('orans', "What?! I killed that Warden. Now we're safe!") }),
+    WIDE({ dur: 2.2, enter: () => { mantis.state = 'stand'; mantis.t = 0; burst(MANTIS_X, GROUND - 70, 14, 220); sfx.rope(); } }),
+    FACE('mantis', 'soft', { side: 'left', line: L('mantis', "I guess there's another enemy left to kill.") }),
+    FACE('orans', 'determined', { bg: 'speed', side: 'right', line: L('orans', "I came all the way here to save you. I won't spare a single one of them. Tell me where he is, and I'll kill that bastard so we can go and live happily.") }),
+    EYES('mantis', 'reveal', { bg: 'focus', sfx: 'sting', line: L('mantis', "You're right. But the thing is...") }),
+    FACE('mantis', 'sinister', { bg: 'dark', scale: 1.6, zoom: 0.04, line: L('mantis', '...only I will live.') }),
+    FACE('orans', 'shock', { bg: 'focus', shake: 8, line: L('orans', 'What?!') }),
+    SPLIT({ who: 'orans', expr: 'pained' }, { who: 'mantis', expr: 'sinister', bg: 'dark' }, { line: L('mantis', 'Your fate is inevitable.') }),
+    WIDE({ dur: 2.0, zoom: 0.04, enter: () => { mantis.state = 'pray'; mantis.t = 0; game.shake = 6; sfx.rumble(); } }),
+    IMPACT('SHNK!!', { enter: mantisStrike }),
+    FACE('orans', 'dying', { bg: 'flash', close: true, dur: 2.6 }),
+    WIDE({ dur: 3.4, zoom: -0.02, enter: () => { mantis.state = 'pray'; } }),
+  ],
 };
 
 // After certain fights, someone appears who wants a word. The scene only plays
@@ -1074,7 +1116,18 @@ const WITNESS = {
 const SCENE_END = {
   henchman: () => { const h = props.find(p => p.kind === 'henchman'); if (h) h.dead = true; },
   oracle: () => giveBlade(),
+  hornetPhase2: () => {
+    const e = bossRef;
+    if (!e) return;
+    becomeSecondForm();
+    e.state = 'approach'; e.t = 0; e.cd = 0.6;
+    // Give Orans some room before the second round starts
+    const [lo, hi] = arenaBounds(), side = Math.sign(player.x - e.x) || -1;
+    player.x = clamp(e.x + side * 260, lo, hi);
+  },
+  hornetDeath: () => { const e = bossRef; if (e && !e.dead) killEnemy(e, Math.sign(e.x - player.x) || 1); },
 };
+const BOSS_SCENES = new Set(['hornetIntro', 'hornetPhase2', 'hornetDeath']);
 
 const TALK_RANGE = 120;
 function nearbyTalker() {
@@ -1102,7 +1155,11 @@ function playScene(name, prop) {
   projectiles = [];
   enemies.forEach(e => (e.say = null));
   Object.assign(player, { state: 'idle', t: 0, vx: 0, vy: 0, y: GROUND, inv: 0 });
-  if (prop) {
+  if (BOSS_SCENES.has(name)) {
+    // Boss scenes play in the arena, with everyone where they stand
+    cine.cam = game.arena ? game.arena.left : camX;
+    if (bossRef) player.face = Math.sign(bossRef.x - player.x) || 1;
+  } else if (prop) {
     // Stand a polite distance away, facing them
     const side = Math.sign(player.x - prop.x) || -1;
     player.x = prop.x + side * 100;
@@ -1138,7 +1195,7 @@ function endScene() {
   SCENE_END[cine.name]?.();
   player.vx = 0;
   game.state = 'play';
-  game.goArrow = 3;
+  if (!game.arena) game.goArrow = 3;
 }
 
 function skipScene() {
@@ -1160,6 +1217,7 @@ function updateCine(dt) {
   if (player.state === 'fallen') { player.t += dt; player.vx *= Math.exp(-6 * dt); player.x += player.vx * dt; }
   updateEffects(dt);
   if (s.kind === 'wide') camX = lerp(camX, cine.cam, 1 - Math.exp(-dt * 4));
+  enemies.forEach(e => { if (e.dead) updateEnemy(e, dt); });   // let bodies finish falling
 
   if (cine.text) {
     const before = Math.floor(cine.chars);
@@ -1548,7 +1606,92 @@ function gauntLines() {
   ctx.restore();
 }
 
+// ---- Hornet: a horned, armoured helmet instead of a face ----
+function hornetBack() {
+  ctx.fillStyle = '#121212'; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-150, 330); ctx.lineTo(-124, 50); ctx.lineTo(-96, 128); ctx.lineTo(0, 150); ctx.lineTo(96, 128); ctx.lineTo(124, 50); ctx.lineTo(150, 330);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+}
+function hornetArmor() {
+  shoulderPath('#161616');
+  ctx.strokeStyle = '#5a5a5a'; ctx.lineWidth = 2;
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(s * 60, 160); ctx.quadraticCurveTo(s * 130, 170, s * 190, 230);
+    ctx.moveTo(s * 70, 192); ctx.quadraticCurveTo(s * 130, 202, s * 196, 272);
+    ctx.stroke();
+  }
+  // Hornet stripes across the chest plate
+  ctx.fillStyle = '#2e2e2e'; ctx.fillRect(-120, 232, 240, 18); ctx.fillRect(-140, 272, 280, 18);
+}
+// expr: 'hNeutral', 'hAngry', 'cracked' (second form) or 'hDying'
+function hornetHead(expr, o) {
+  const cracked = expr === 'cracked' || expr === 'hDying', dying = expr === 'hDying';
+  const angry = expr === 'hAngry' || expr === 'cracked';
+  ctx.fillStyle = '#121212'; ctx.fillRect(-26, 60, 52, 96);
+  for (const s of [-1, 1]) {
+    ctx.fillStyle = '#141414'; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(s * 44, -70); ctx.bezierCurveTo(s * 80, -110, s * 122, -140, s * 112, -200); ctx.bezierCurveTo(s * 100, -150, s * 70, -120, s * 30, -86);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = '#6a6a6a'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(s * 56, -86); ctx.bezierCurveTo(s * 86, -112, s * 104, -140, s * 108, -180); ctx.stroke();
+  }
+  ctx.strokeStyle = '#8a8a8a'; ctx.lineWidth = 2;
+  for (const s of [-1, 1]) {
+    ctx.beginPath(); ctx.moveTo(s * 12, -96); ctx.quadraticCurveTo(s * 30, -170, s * 66, -196 + Math.sin(game.t * 3 + s) * 4); ctx.stroke();
+  }
+  facePath(1.12);
+  ctx.fillStyle = '#161616'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 3.2; ctx.stroke();
+  ctx.save(); facePath(1.12); ctx.clip();
+  ctx.fillStyle = '#2c2c2c'; ctx.fillRect(-90, -64, 180, 12); ctx.fillRect(-90, -40, 180, 8);
+  ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, -100); ctx.lineTo(0, 40); ctx.stroke();
+  ctx.strokeStyle = '#7a7a7a'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(66, -40); ctx.bezierCurveTo(72, 26, 60, 62, 30, 92); ctx.stroke();
+  if (cracked) {
+    // A chunk of the helmet has broken away, showing a compound insect eye beneath
+    ctx.fillStyle = '#262626';
+    ctx.beginPath(); ctx.moveTo(-76, -22); ctx.lineTo(-30, -34); ctx.lineTo(-12, -8); ctx.lineTo(-22, 22); ctx.lineTo(-52, 34); ctx.lineTo(-78, 18); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#3c3c3c'; ctx.beginPath(); ctx.ellipse(-42, 2, 24, 22, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = dying ? '#6a6a6a' : '#a8a8a8';
+    for (let gy = -18; gy <= 18; gy += 6) for (let gx = -22; gx <= 22; gx += 6) {
+      const ox = gx + ((gy / 6) % 2 ? 3 : 0);
+      if ((ox * ox) / 484 + (gy * gy) / 400 < 0.85) circle(-42 + ox, 2 + gy, 1.6);
+    }
+    if (!dying) { ctx.fillStyle = PAPER; circle(-50, -8, 4); }
+    ctx.strokeStyle = '#9a9a9a'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-12, -8); ctx.lineTo(12, -30); ctx.lineTo(26, -26);
+    ctx.moveTo(-22, 22); ctx.lineTo(4, 40); ctx.lineTo(10, 64);
+    ctx.moveTo(-30, -34); ctx.lineTo(-20, -70);
+    ctx.stroke();
+  }
+  ctx.restore();
+  // Glowing eye slits (just the one when the helmet is cracked)
+  ctx.save();
+  ctx.shadowColor = WHITE; ctx.shadowBlur = dying ? 4 : 18;
+  ctx.fillStyle = dying ? '#9a9a9a' : WHITE;
+  for (const s of cracked ? [1] : [-1, 1]) {
+    const tilt = angry ? 9 : 3;
+    ctx.beginPath(); ctx.moveTo(s * 14, 6); ctx.lineTo(s * 56, -4 - tilt); ctx.lineTo(s * 52, 8); ctx.lineTo(s * 18, 14); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // Mandibles, which open and close while he talks
+  const flap = o.talking && Math.floor(game.t * 11) % 2 === 0 ? 5 : 0;
+  ctx.fillStyle = '#141414'; ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(s * 30, 86); ctx.quadraticCurveTo(s * (34 + flap), 116, s * (8 + flap), 128); ctx.quadraticCurveTo(s * (22 + flap), 110, s * 14, 92);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  if (dying) { bloodTrail([[-22, 22], [-24, 46], [-22, 70]], 3.4); bloodTrail([[10, 110], [12, 126], [11, 140]], 3); }
+  else if (cracked) bloodTrail([[-50, 34], [-52, 52]], 2.6);
+}
+
 const FACES = {
+  hornet:   { custom: hornetHead, back: hornetBack, body: hornetArmor },
   orans:   { jaw: 1.04, lash: 0, browW: 1,   back: oransHairBack, body: oransCoat, front: oransScarf, hair: oransHairFront, mark: oransScar },
   mantis:   { jaw: 0.9,  lash: 3, browW: 0.7, back: mantisHairBack, body: mantisShoulders, front: mantisNecklace, hair: mantisHairFront, lips: true, mole: true },
   henchman: { jaw: 1.08, lash: 0, browW: 1.1, back: hoodBack('#1a1a1a'), body: hoodieBody, hair: hoodFront('#1a1a1a'), overlay: crackedMask },
@@ -1671,6 +1814,7 @@ function drawPortrait(who, exprName, x, y, s, o = {}) {
 
   F.back?.();
   F.body?.();
+  if (F.custom) { F.custom(exprName, o); ctx.restore(); return; }
   // Neck, with tone shading under the jaw
   ctx.fillStyle = PAPER; ctx.strokeStyle = INK; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.moveTo(-27, 60); ctx.lineTo(-25, 156); ctx.lineTo(25, 156); ctx.lineTo(27, 60); ctx.closePath(); ctx.fill();
@@ -1881,6 +2025,26 @@ function drawImpact(s, t) {
   ctx.textBaseline = 'alphabetic';
 }
 
+// An anime-style villain introduction: the name slams in with a red slash under it
+function drawTitleCard(s, t) {
+  BG.dark(t);
+  focusLines(VW / 2, VH / 2, 300, 'rgba(242,242,242,0.10)', 120, Math.floor(game.t / 0.1) + 2);
+  const k = ease(Math.min(1, t / 0.45));
+  ctx.save();
+  ctx.translate(VW / 2 + (1 - k) * 420, VH * 0.47); ctx.rotate(-0.06);
+  ctx.font = '900 120px Cinzel, serif'; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+  ctx.lineWidth = 10; ctx.strokeStyle = INK; ctx.strokeText(s.name, 0, 0);
+  ctx.fillStyle = WHITE; ctx.fillText(s.name, 0, 0);
+  const w = ctx.measureText(s.name).width, sw = w * ease(clamp((t - 0.3) / 0.35, 0, 1));
+  ctx.fillStyle = RED;
+  ctx.beginPath(); ctx.moveTo(-w / 2 - 20, 22); ctx.lineTo(-w / 2 - 20 + sw + 50, 14); ctx.lineTo(-w / 2 - 40 + sw + 50, 30); ctx.lineTo(-w / 2 - 30, 34); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.globalAlpha = clamp((t - 0.5) / 0.4, 0, 1);
+  ctx.textAlign = 'center'; ctx.font = '700 22px Cinzel, serif'; ctx.fillStyle = '#cfcfcf';
+  ctx.fillText(s.sub, VW / 2, VH * 0.47 + 74);
+  ctx.globalAlpha = 1; ctx.textAlign = 'left';
+}
+
 // A weapon shown big on screen, with a gleam running along the edge
 function drawItemShot(s, t) {
   BG.dark(t);
@@ -1925,6 +2089,7 @@ function drawCine() {
     case 'split': drawSplitShot(s, t); break;
     case 'impact': drawImpact(s, t); break;
     case 'item': drawItemShot(s, t); break;
+    case 'titlecard': drawTitleCard(s, t); break;
   }
   ctx.restore();
 
@@ -2340,6 +2505,7 @@ function enemyPose(e) {
     return { lean: 0.3, armF: [1.6, 0], armB: [0.3, 2.0], legF: [0.45, -0.15], legB: [-0.35, -0.05] };
   }
   if (e.state === 'hurt') return P.hurt();
+  if (e.state === 'kneel') return { ...P.kneel(), head: 0.55, lean: 0.4, armF: [0.3, 0.4], armB: [-0.1, 0.4] };
   if (e.state === 'transform') {
     // Roaring, arms thrown wide
     const shake = Math.sin(game.t * 40) * 0.05;
@@ -2691,7 +2857,7 @@ function drawWorld() {
       ctx.beginPath(); ctx.ellipse(e.diveX, GROUND + 2, 70, 12, 0, 0, Math.PI * 2); ctx.stroke();
       ctx.beginPath(); ctx.ellipse(e.diveX, GROUND + 2, 30, 5, 0, 0, Math.PI * 2); ctx.stroke();
     }
-    drawFigure(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { flash: e.flash > 0, glow: e.state === 'windup' || e.state === 'transform', wings: e.phase2 });
+    drawFigure(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { flash: e.flash > 0, glow: e.state === 'windup' || e.state === 'transform', wings: e.phase2 && !e.defeated });
     if (e.state === 'windup') {
       ctx.fillStyle = WHITE; ctx.font = '900 24px Cinzel, serif'; ctx.textAlign = 'center';
       ctx.fillText('!', e.x, e.y - e.T.h - 18);
@@ -2961,12 +3127,13 @@ function drawFinal() {
     if (a2 > 0) drawLetters(MORTAL, VW / 2, 200, 92, a2, 16);
   }
   ctx.textAlign = 'center';
-  const lines = [[6.4, 'Orans. Mantis.'], [7.3, 'Together, the praying mantis.'], [8.2, 'Where the female kills the male.']];
-  ctx.font = '21px "Special Elite", monospace';
+  // Closing lines written by Shifa
+  const lines = [[6.4, 'He PRAYED for her life'], [7.8, 'She PREYED for her life']];
+  ctx.font = '24px "Special Elite", monospace';
   lines.forEach(([at, text], i) => {
-    ctx.globalAlpha = clamp((t - at) / 0.7, 0, 1);
-    ctx.fillStyle = i === 2 ? WHITE : '#b8b8b8';
-    ctx.fillText(text, VW / 2, 290 + i * 34);
+    ctx.globalAlpha = clamp((t - at) / 0.8, 0, 1);
+    ctx.fillStyle = i === 1 ? WHITE : '#b8b8b8';
+    ctx.fillText(text, VW / 2, 300 + i * 42);
   });
   ctx.globalAlpha = clamp((t - 9.4) / 0.7, 0, 1);
   ctx.font = '15px "Special Elite", monospace'; ctx.fillStyle = '#8a8a8a';
