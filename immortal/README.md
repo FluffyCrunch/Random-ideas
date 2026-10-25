@@ -30,11 +30,11 @@ The highlighted **m** and **o** are the two characters: **M**antis and **O**rans
 
 ## The story
 
-Between fights, the game cuts to manga-style cutscenes: animated close-ups, extreme eye shots, focus lines, split panels and impact frames.
+Along the way, Orans meets people who want a word. A **…** appears over them; walk up and press **E** (or **TALK** on touch) to hear them out. Talking is your choice, but you'll miss things if you don't. Their stories play as manga-style cutscenes: animated close-ups, extreme eye shots, focus lines, split panels and impact frames.
 
-- **The henchman:** a dying enemy in a cracked mask tells Orans that Mantis is not what he thinks she is.
-- **The old woman:** a blind fortune teller in the market once read Mantis' palm, and saw three husbands before him.
-- **The stranger:** a gaunt man chained to the bridge says he was her last husband, and he couldn't die either.
+- **The henchman:** the last man standing after a fight, kneeling in a cracked mask, with one warning left in him.
+- **The old woman:** a blind fortune teller in the market who once read Mantis' palm. She speaks in riddles, and gives Orans an old blade that someone left behind.
+- **The stranger:** a gaunt man chained to the bridge, who seems to know exactly how this road ends.
 - **The tower:** Orans finally reaches her.
 
 What Mantis says at the end depends on how many times you died, and she quotes your real final stats back at you.
@@ -47,7 +47,8 @@ What Mantis says at the end depends on how many times you died, and she quotes y
 | <kbd>Space</kbd> or <kbd>↑</kbd> | Jump button | Jump (also clears knives and shockwaves) |
 | Left click | HIT | Attack; click fast for a punch-punch-kick combo |
 | Right click | HVY | Heavy attack: slow, but staggers anything and breaks shields |
-| Ctrl | ROLL | Dodge roll; roll right as a hit lands for a **perfect dodge** |
+| Ctrl | ROLL | Dodge roll (crouch, roll, rise); roll right as a hit lands for a **perfect dodge** |
+| E | TALK | Talk to someone when you're next to them |
 | P or Esc | II | Pause |
 | M | | Sound on or off |
 
@@ -67,7 +68,11 @@ Cutscenes play by themselves and ignore every key and click, so you can't skip o
 - **Throwers:** hooded, keep their distance and sometimes throw two knives in a row
 - **Guards:** carry a shield that blocks light hits from the front. Hit them with a heavy strike or the combo's final kick, or get behind them.
 - **Brutes:** big and slow, and their slam sends shockwaves along the ground. Jump or roll over them.
-- **The Warden:** keeper of the tower, with slams, dashes and three-hit combos. At half health he gets angry, speeds up and calls in backup.
+- **Hornet, the Warden:** keeper of the tower, with slams, charging dashes and three-hit combos. At half health he transforms: he roars, grows insect wings and comes back faster, with a leap that dives down on you. A ring on the ground shows where he'll land, so get out of it.
+
+## The old blade
+
+Talk to the old woman and she gives Orans a blade. From then on he fights with a sword: longer reach and **+3 damage on every hit**. The bonus is steel, not Orans, so unlike his own strength it **never shrinks when he dies**.
 
 ## How it's made
 

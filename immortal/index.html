@@ -28,6 +28,9 @@
     user-select: none; -webkit-user-select: none; touch-action: none;
   }
   .tbtn.on { background: rgba(242,242,242,.35); }
+  /* TALK only appears when Orans is next to someone who wants to talk */
+  #ttalk { display: none; background: rgba(242,242,242,.85); color: #0a0a0a; }
+  body.can-talk #ttalk { display: block; }
   #tpause {
     position: fixed; top: 12px; right: 12px; display: none; width: 44px; height: 44px;
     align-items: center; justify-content: center;
@@ -47,6 +50,7 @@
     <button class="tbtn" data-a="jump">▲</button>
     <button class="tbtn" data-a="heavy">HVY</button>
     <button class="tbtn" data-a="light">HIT</button>
+    <button class="tbtn" id="ttalk" data-a="interact">TALK</button>
   </div>
 </div>
 <button class="tbtn" id="tpause" data-a="pause">II</button>
@@ -65,6 +69,8 @@ const BASE_HP = 100, BASE_DMG = 10;
 const DECAY = 0.85;                // each death keeps 85% of max HP and damage
 const MIN_HP = 40, MIN_DMG = 5;    // weakness floors, so the game stays finishable
 const MAX_ATTACKERS = 3;           // melee enemies allowed to swing at once
+const DODGE = { crouch: 0.08, roll: 0.26, rise: 0.09 };  // seconds per phase of the dodge roll
+const BLADE_BONUS = 3;             // the old blade's damage per hit, which never decays
 
 const WHITE = '#f2f2f2', PAPER = '#f2f2f2', INK = '#0a0a0a';
 const BODY = '#0b0b0b', BACK = '#1f1f1f', RIM = '#a6a6a6';
@@ -119,7 +125,7 @@ const pressed = {};
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
   ArrowUp: 'jump', Space: 'jump',
-  ControlLeft: 'dodge', ControlRight: 'dodge',
+  ControlLeft: 'dodge', ControlRight: 'dodge', KeyE: 'interact',
   Enter: 'confirm', KeyP: 'pause', Escape: 'pause', KeyM: 'mute',
 };
 function press(a) { if (!keys[a]) pressed[a] = game.t; keys[a] = true; }
@@ -221,6 +227,7 @@ const sfx = {
   start: () => tone(220, 0.8, 'sine', 0.12, 2),
   sting: () => { tone(1200, 0.9, 'sine', 0.07, 0.25); tone(600, 0.9, 'triangle', 0.05, 0.3); noise(0.4, 0.06, 3000, 'highpass'); },
   cut: () => noise(0.05, 0.04, 4000, 'highpass'),
+  shing: () => { tone(2400, 0.9, 'triangle', 0.06, 0.7); tone(3600, 0.6, 'sine', 0.04, 0.8); noise(0.25, 0.06, 6000, 'highpass'); },
   thud: () => { tone(70, 0.4, 'sine', 0.25, 0.5); noise(0.2, 0.2, 300); },
   rope: () => noise(0.35, 0.1, 1500, 'bandpass'),
   rumble: () => tone(45, 1.8, 'sine', 0.3, 0.8),
@@ -299,6 +306,7 @@ const CONTROLS = [
   'Left click     attack (click fast for a combo)',
   'Right click     heavy attack, breaks shields',
   'Ctrl     dodge roll',
+  'E     talk to people you meet',
   'P     pause   ·   M     sound',
 ];
 
@@ -436,9 +444,15 @@ function updatePlayer(dt) {
       else { p.state = 'idle'; p.combo = 0; }
     }
   } else if (p.state === 'dodge') {
+    // Crouch, roll, then rise back up
     p.t += dt;
-    p.vx = p.face * 560 * (1 - p.t / 0.36);
-    if (p.t >= 0.36) p.state = 'idle';
+    const { crouch, roll, rise } = DODGE;
+    if (p.t < crouch) p.vx = p.face * 140;
+    else if (p.t < crouch + roll) {
+      if (!p.dust) { p.dust = true; burst(p.x - p.face * 10, GROUND - 4, 7, 160); }
+      p.vx = p.face * 520 * (0.55 + 0.45 * Math.sin(Math.PI * (p.t - crouch) / roll));
+    } else p.vx *= Math.exp(-14 * dt);
+    if (p.t >= crouch + roll + rise) p.state = 'idle';
   } else if (p.state === 'hurt') {
     p.t += dt;
     p.vx *= Math.exp(-8 * dt);
@@ -450,7 +464,8 @@ function updatePlayer(dt) {
     if (consume('light')) startAttack('light');
     else if (consume('heavy')) startAttack('heavy');
     else if (p.dodgeCd <= 0 && consume('dodge')) {
-      p.state = 'dodge'; p.t = 0; p.inv = Math.max(p.inv, 0.3); p.dodgeCd = 0.75; p.perfect = false;
+      p.state = 'dodge'; p.t = 0; p.dodgeCd = 0.8; p.perfect = false; p.dust = false;
+      p.inv = Math.max(p.inv, DODGE.crouch + DODGE.roll);
       if (move) p.face = move;
       sfx.dodge();
     }
@@ -460,14 +475,16 @@ function updatePlayer(dt) {
 
 function playerHit(a) {
   const p = player;
-  const x0 = p.face > 0 ? p.x + 6 : p.x - 6 - a.reach, x1 = x0 + a.reach;
+  const reach = a.reach + (p.blade ? 34 : 0);
+  const x0 = p.face > 0 ? p.x + 6 : p.x - 6 - reach, x1 = x0 + reach;
   const y0 = p.y - 140, y1 = p.y - 5;
   for (const e of enemies) {
     if (e.dead || p.hitSet.has(e)) continue;
     const ex0 = e.x - e.T.w / 2, ex1 = e.x + e.T.w / 2, ey0 = e.y - e.T.h;
     if (x1 < ex0 || x0 > ex1 || y1 < ey0 || y0 > e.y) continue;
     p.hitSet.add(e);
-    damageEnemy(e, p.dmg * a.mult, a);
+    // The blade's bonus is steel, not Orans, so it doesn't shrink when he dies
+    damageEnemy(e, (p.dmg + (p.blade ? BLADE_BONUS : 0)) * a.mult, a);
   }
   // Knives can be knocked out of the air
   for (const k of projectiles) {
@@ -493,6 +510,7 @@ function damageEnemy(e, dmg, a) {
     e.flash = 0.06;
     return;
   }
+  if (e.state === 'transform') return;   // Hornet can't be hurt while changing form
   e.hp -= dmg;
   e.flash = 0.12;
   game.hitstop = a.stagger ? 0.09 : 0.05;
@@ -502,12 +520,7 @@ function damageEnemy(e, dmg, a) {
   burst(e.x - dir * 10, e.y - e.T.h * 0.6, a.stagger ? 14 : 8);
   sfx.hit(a.stagger);
   if (e.hp <= 0) { killEnemy(e, dir); return; }
-  if (e.T.boss && !e.phase2 && e.hp < e.T.hp / 2) {
-    e.phase2 = true;
-    say(e, 'Enough games.', 2.5);
-    game.shake = 12;
-    summonAdds();
-  }
+  if (e.T.boss && !e.phase2 && e.hp < e.T.hp / 2) { startPhaseTwo(e); return; }
   if (!e.T.armor || a.stagger) {
     if (e.T.shield && a.stagger) popText(e.x, e.y - e.T.h - 34, 'BREAK', true);
     e.state = 'hurt'; e.t = 0;
@@ -515,14 +528,19 @@ function damageEnemy(e, dmg, a) {
   }
 }
 
-function summonAdds() {
-  const a = game.arena;
-  if (!a) return;
-  for (const d of [-1, 1]) {
-    const g = makeEnemy('grunt', d < 0 ? a.left - 40 : a.left + VW + 40);
-    g.side = d; g.face = -d;
-    enemies.push(g);
-  }
+// At half health Hornet roars, sprouts wings and comes back faster with a diving attack
+function startPhaseTwo(e) {
+  e.phase2 = true;
+  e.state = 'transform'; e.t = 0; e.kbv = 0;
+  say(e, 'Enough. Let me show you what she made of me.', 3.2);
+  showBanner('HORNET AWAKENS', 'second form');
+  game.shake = 16;
+  game.slowmo = 0.5;
+  sfx.rumble();
+  ring(e.x, e.y - 120);
+  const away = Math.sign(player.x - e.x) || 1;
+  player.vx = away * 520;
+  projectiles = [];
 }
 
 function killEnemy(e, dir) {
@@ -535,7 +553,7 @@ function killEnemy(e, dir) {
     bossRef = null;
     game.slowmo = 1.2;
     game.shake = 16;
-    showBanner('THE WARDEN FALLS', 'the tower is open');
+    showBanner('HORNET FALLS', 'the tower is open');
   }
 }
 
@@ -544,7 +562,7 @@ function hurtPlayer(dmg, dir, src) {
   const p = player;
   if (p.state === 'dying' || game.state !== 'play') return false;
   // Dodging right as an attack lands is a perfect dodge: slow-mo and the attacker is stunned
-  if (p.state === 'dodge' && p.t < 0.22) {
+  if (p.state === 'dodge' && p.t < DODGE.crouch + 0.18) {
     if (!p.perfect) {
       p.perfect = true;
       game.slowmo = Math.max(game.slowmo, 0.6);
@@ -622,7 +640,8 @@ function meleeStrike(e, dist) {
   const inFront = Math.sign(p.x - e.x) === e.face || dist < 24;
   const mult = T.boss && e.kind === 'melee' ? 0.6 : 1;
   if (inFront && dist <= T.range + 22 && p.y > GROUND - 80) hurtPlayer(T.dmg * mult, e.face, e);
-  if (e.kind === 'slam') {
+  // In his second form, the last hit of Hornet's combo also shakes the ground
+  if (e.kind === 'slam' || (T.boss && e.phase2 && e.kind === 'melee' && e.hitsLeft <= 1)) {
     // Ground shockwaves roll out both ways: jump or roll over them
     game.shake = Math.max(game.shake, 9);
     for (const d of [-1, 1]) projectiles.push({ type: 'wave', x: e.x + d * 30, dir: d, life: 0.6, dmg: Math.round(T.dmg * 0.55), hit: false });
@@ -644,7 +663,7 @@ function updateEnemy(e, dt) {
   const p = player, T = e.T;
   const dx = p.x - e.x, dist = Math.abs(dx), dir = Math.sign(dx) || 1;
   const playerDown = p.state === 'dying' || game.state !== 'play';
-  const haste = e.phase2 ? 0.8 : 1;
+  const haste = e.phase2 ? 0.75 : 1;
   e.cd -= dt;
   e.t += dt;
   let vx = 0;
@@ -667,13 +686,18 @@ function updateEnemy(e, dt) {
         if (slot < lo + 10 || slot > hi - 10) slot = p.x - e.side * T.range * 0.85;
       }
       const toSlot = slot - e.x;
-      if (Math.abs(toSlot) > 12) vx = Math.sign(toSlot) * T.speed * (e.phase2 ? 1.25 : 1);
-      if (T.boss && e.cd <= 0 && dist > 240 && dist < 560) { startWindup(e, 'dash', 0.5 * haste); break; }
+      if (Math.abs(toSlot) > 12) vx = Math.sign(toSlot) * T.speed * (e.phase2 ? 1.3 : 1);
+      if (T.boss && e.cd <= 0 && dist > 240 && dist < 600) {
+        // From range: a charging dash, or in the second form, a leap that lands on you
+        startWindup(e, e.phase2 && Math.random() < 0.5 ? 'dive' : 'dash', 0.5 * haste);
+        break;
+      }
       if (dist <= T.range + 14 && e.cd <= 0 && (T.boss || attackers() < MAX_ATTACKERS)) {
         if (T.boss) {
-          const slam = Math.random() < 0.4;
-          e.hitsLeft = slam ? 1 : 3;
-          startWindup(e, slam ? 'slam' : 'melee', (slam ? T.windup * 1.2 : 0.32) * haste);
+          const r = Math.random();
+          if (e.phase2 && r < 0.3) startWindup(e, 'dive', 0.45);
+          else if (r < 0.6) { e.hitsLeft = 1; startWindup(e, 'slam', T.windup * 1.2 * haste); }
+          else { e.hitsLeft = 3; startWindup(e, 'melee', 0.32 * haste); }
         } else {
           e.hitsLeft = e.type === 'grunt' && Math.random() < 0.5 ? 2 : 1;
           startWindup(e, e.type === 'brute' ? 'slam' : 'melee', T.windup);
@@ -685,10 +709,33 @@ function updateEnemy(e, dt) {
       if (e.t >= e.wind) {
         e.state = 'attack'; e.t = 0; e.hitDone = false;
         if (e.kind === 'throw') throwKnife(e);
-        else sfx.swing(T.boss || e.type === 'brute');
+        else if (e.kind === 'dive') {
+          // Leap high and aim for where Orans is standing right now
+          const [lo, hi] = game.arena ? arenaBounds() : [p.x - 300, p.x + 300];
+          e.vy = -1150; e.diveX = clamp(p.x, lo, hi);
+          sfx.dodge();
+        } else sfx.swing(T.boss || e.type === 'brute');
       }
       break;
+    case 'transform':
+      if (e.t >= 1.6) { e.state = 'approach'; e.t = 0; e.cd = 0.3; }
+      break;
     case 'attack':
+      if (e.kind === 'dive') {
+        e.vy += GRAV * 1.1 * dt;
+        e.y += e.vy * dt;
+        vx = clamp((e.diveX - e.x) * 4, -900, 900);
+        if (e.y >= GROUND && e.vy > 0) {
+          e.y = GROUND; e.vy = 0;
+          if (Math.abs(p.x - e.x) < 80 && p.y > GROUND - 60) hurtPlayer(T.dmg, Math.sign(p.x - e.x) || 1, e);
+          for (const d of [-1, 1]) projectiles.push({ type: 'wave', x: e.x + d * 30, dir: d, life: 0.6, dmg: Math.round(T.dmg * 0.5), hit: false });
+          game.shake = Math.max(game.shake, 14);
+          burst(e.x, GROUND - 4, 16, 380);
+          sfx.slam();
+          e.state = 'recover'; e.t = 0;
+        }
+        break;
+      }
       if (e.kind === 'dash') {
         vx = e.face * 680;
         if (!e.hitDone && Math.abs(p.x - e.x) < 56 && p.y > GROUND - 90 && hurtPlayer(T.dmg * 0.8, e.face, e)) e.hitDone = true;
@@ -774,7 +821,7 @@ function spawnWave(list) {
     bossRef = enemies.find(e => e.type === 'warden' && !e.dead);
     say(bossRef, "She said you'd come. She said to make it hurt.", 3.5);
     say(mantis, 'Orans! Save me!', 3);
-    showBanner('THE WARDEN', 'keeper of the tower');
+    showBanner('HORNET', 'the warden of the tower');
   } else if (Math.random() < 0.75) {
     const talker = enemies[enemies.length - 1];
     const pool = game.deaths > 0 && Math.random() < 0.6 ? TAUNTS.after : TAUNTS.any;
@@ -796,8 +843,8 @@ function updateEncounters() {
   } else {
     enc.done = true;
     game.arena = null;
-    if (enc.scene) playScene(enc.scene);
-    else game.goArrow = 3;
+    if (enc.scene) WITNESS[enc.scene](enc);
+    game.goArrow = 3;
   }
 }
 
@@ -881,6 +928,14 @@ function updatePlay(dt) {
   updateZones();
   updateCamera(dt);
 
+  const talker = nearbyTalker();
+  document.body.classList.toggle('can-talk', !!talker);
+  if (talker && consume('interact') && (player.state === 'idle' || player.state === 'hurt')) {
+    talker.talked = true;
+    playScene(talker.scene, talker);
+    return;
+  }
+
   if (player.state === 'dying' && (game.dieT += dt) > 1.5) enterDeathScreen();
   if (!game.arena && game.encounters.every(e => e.done) && player.x >= MANTIS_X - 230 && player.state !== 'dying') playScene('finale');
 }
@@ -916,6 +971,7 @@ const FACE = (who, expr, o = {}) => ({ kind: 'face', who, expr, ...o });
 const EYES = (who, expr, o = {}) => ({ kind: 'eyes', who, expr, zoom: 0.035, ...o });
 const SPLIT = (left, right, o = {}) => ({ kind: 'split', left, right, ...o });
 const IMPACT = (text, o = {}) => ({ kind: 'impact', text, dur: 0.9, zoom: 0, ...o });
+const ITEM = (title, sub, o = {}) => ({ kind: 'item', title, sub, dur: 3.2, zoom: 0.015, sfx: 'shing', ...o });
 
 function walkOn(dt) { player.face = 1; player.vx = 130; player.x = Math.min(player.x + 130 * dt, MANTIS_X - 80); }
 function walkToMantis(dt) {
@@ -937,15 +993,18 @@ const SCENES = {
     WIDE({ dur: 2.6, enter: () => { const h = props.find(p => p.kind === 'henchman'); if (h) h.dead = true; sfx.thud(); } }),
   ],
 
+  // She only hints. The player should work it out for themselves.
   oracle: () => [
     WIDE({ line: L('oracle', 'Boy. The one with the scarf.') }),
     FACE('orans', 'neutral', { side: 'right', line: L('orans', "I don't have time, old woman.") }),
-    FACE('oracle', 'wise', { side: 'left', line: L('oracle', 'I read her palm once.') }),
-    EYES('oracle', 'reveal', { bg: 'focus', sfx: 'sting', line: L('oracle', 'Three husbands before you.') }),
-    FACE('oracle', 'wise', { bg: 'rain', line: L('oracle', 'All of them immortal. All of them gone.') }),
-    FACE('orans', 'shock', { bg: 'focus', shake: 6, line: L('orans', '...Three?') }),
-    FACE('oracle', 'knowing', { side: 'left', line: L('oracle', 'The mantis loves her mate too. Right up until she gets hungry.') }),
-    FACE('orans', 'determined', { bg: 'speed', side: 'right', line: L('orans', "You're wrong about her.") }),
+    FACE('oracle', 'wise', { side: 'left', line: L('oracle', 'Nobody on this road ever does.') }),
+    FACE('oracle', 'wise', { bg: 'rain', line: L('oracle', 'I read her palm once. Her heart line splits... and splits again.') }),
+    FACE('orans', 'shock', { bg: 'focus', shake: 6, line: L('orans', '...What is that supposed to mean?') }),
+    EYES('oracle', 'reveal', { bg: 'focus', sfx: 'sting', line: L('oracle', 'Have you ever watched something pray, boy? Hands folded. So still. So sweet.') }),
+    FACE('oracle', 'knowing', { side: 'left', line: L('oracle', "Whatever it's praying for... it isn't you.") }),
+    FACE('oracle', 'wise', { side: 'left', line: L('oracle', 'Take this. The last young man who came through here left it behind.') }),
+    ITEM('THE OLD BLADE', "Steel doesn't weaken when you do.", { enter: giveBlade }),
+    FACE('orans', 'determined', { bg: 'speed', side: 'right', line: L('orans', "...Thank you. But you're wrong about her.") }),
     WIDE({ dur: 2.8, update: walkOn, line: L('oracle', 'They never listen.') }),
   ],
 
@@ -955,6 +1014,7 @@ const SCENES = {
       WIDE({ dur: 2.6, enter: () => sfx.chains() }),
       FACE('ghost', 'empty', { bg: 'rain', line: L('ghost', 'Another one... Let me guess. She was taken.') }),
       FACE('orans', 'determined', { side: 'right', line: L('orans', 'Who are you?') }),
+      ...(player.blade ? [FACE('ghost', 'shock', { bg: 'focus', line: L('ghost', '...That blade. I left it with an old woman in the market.') })] : []),
       FACE('ghost', 'sad', { side: 'left', bg: 'rain', line: L('ghost', "Her last husband. I couldn't die either.") }),
       FACE('ghost', 'empty', { line: L('ghost', d > 0
         ? "I came back eleven times. Each time, a little less of me. You've already started. I can see it."
@@ -995,30 +1055,32 @@ const SCENES = {
   },
 };
 
-// Puts the person giving the warning into the world near Orans
-const SCENE_INIT = {
-  henchman: () => {
-    const e = game.lastKilled, x = e ? e.x : player.x + 110;
+// After certain fights, someone appears who wants a word. The scene only plays
+// once Orans walks up and chooses to talk (E, or the TALK button on touch).
+const WITNESS = {
+  henchman: enc => {
+    // The last man standing doesn't die straight away: he kneels where he fell
+    const e = game.lastKilled, x = e ? e.x : enc.x + 120;
     enemies = enemies.filter(en => en !== e);
-    const face = Math.sign(player.x - x) || -1;
-    props.push({ kind: 'henchman', x, face, dead: false });
-    player.face = -face;
-    cine.cam = clamp((player.x + x) / 2 - VW / 2, 0, LEVEL_END - VW);
+    props.push({ kind: 'henchman', x, face: Math.sign(player.x - x) || -1, scene: 'henchman', dead: false });
   },
-  oracle: () => {
-    const x = player.x + 230;
-    props.push({ kind: 'oracle', x, face: -1 });
-    player.face = 1;
-    cine.cam = clamp((player.x + x) / 2 - VW / 2, 0, LEVEL_END - VW);
-  },
-  ghost: () => {
-    const x = player.x + 220;
-    props.push({ kind: 'ghost', x, face: -1 });
-    player.face = 1;
-    cine.cam = clamp((player.x + x) / 2 - VW / 2, 0, LEVEL_END - VW);
-  },
-  finale: () => { cine.cam = MANTIS_X - VW * 0.62; },
+  oracle: enc => props.push({ kind: 'oracle', x: enc.x + 200, face: -1, scene: 'oracle' }),
+  ghost: enc => props.push({ kind: 'ghost', x: enc.x + 200, face: -1, scene: 'ghost' }),
 };
+
+// What a scene leaves behind, even if it was skipped
+const SCENE_END = {
+  henchman: () => { const h = props.find(p => p.kind === 'henchman'); if (h) h.dead = true; },
+  oracle: () => giveBlade(),
+};
+
+const TALK_RANGE = 120;
+function nearbyTalker() {
+  if (game.arena) return null;
+  return props.find(pr => pr.scene && !pr.talked && Math.abs(pr.x - player.x) < TALK_RANGE) || null;
+}
+
+function giveBlade() { player.blade = true; }
 
 function mantisStrike() {
   mantis.state = 'strike'; mantis.t = 0;
@@ -1029,15 +1091,23 @@ function mantisStrike() {
   sfx.stab();
 }
 
-function playScene(name) {
+function playScene(name, prop) {
   game.state = 'cine';
   skipHold = 0;
   clearInput();
+  document.body.classList.remove('can-talk');
   cine.name = name;
   projectiles = [];
   enemies.forEach(e => (e.say = null));
   Object.assign(player, { state: 'idle', t: 0, vx: 0, vy: 0, y: GROUND, inv: 0 });
-  SCENE_INIT[name]?.();
+  if (prop) {
+    // Stand a polite distance away, facing them
+    const side = Math.sign(player.x - prop.x) || -1;
+    player.x = prop.x + side * 100;
+    player.face = -side;
+    prop.face = side;
+    cine.cam = clamp((player.x + prop.x) / 2 - VW / 2, 0, LEVEL_END - VW);
+  } else cine.cam = MANTIS_X - VW * 0.62;
   cine.shots = SCENES[name]();
   cine.i = 0;
   startShot();
@@ -1063,8 +1133,7 @@ function nextShot() {
 function endScene() {
   clearInput();
   if (cine.name === 'finale') { game.state = 'final'; game.final = { t: 0 }; return; }
-  const h = props.find(p => p.kind === 'henchman');
-  if (h) h.dead = true;
+  SCENE_END[cine.name]?.();
   player.vx = 0;
   game.state = 'play';
   game.goArrow = 3;
@@ -1735,6 +1804,35 @@ function drawImpact(s, t) {
   ctx.textBaseline = 'alphabetic';
 }
 
+// A weapon shown big on screen, with a gleam running along the edge
+function drawItemShot(s, t) {
+  BG.dark(t);
+  focusLines(VW / 2, VH * 0.42, 260, 'rgba(242,242,242,0.08)', 90, 5);
+  ctx.save();
+  ctx.translate(VW / 2, VH * 0.37); ctx.rotate(-0.33);
+  const k = ease(Math.min(1, t / 0.5)), len = 340 * k;
+  ctx.fillStyle = '#7a7a7a'; ctx.fillRect(-len / 2 - 70, -4, 70, 8);           // grip
+  ctx.fillStyle = '#bdbdbd'; ctx.fillRect(-len / 2 - 6, -22, 12, 44);           // crossguard
+  ctx.fillStyle = WHITE;
+  ctx.beginPath(); ctx.moveTo(-len / 2, -9); ctx.lineTo(len / 2 - 30, -6); ctx.lineTo(len / 2 + 10, 0); ctx.lineTo(len / 2 - 30, 6); ctx.lineTo(-len / 2, 9); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#9a9a9a'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(-len / 2, 0); ctx.lineTo(len / 2 - 20, 0); ctx.stroke();
+  const gx = -len / 2 + ((t * 420) % (len + 200)) - 100;
+  const g = ctx.createLinearGradient(gx - 40, 0, gx + 40, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.95)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(gx - 40, -26, 80, 52);
+  ctx.restore();
+  const a = clamp((t - 0.5) / 0.5, 0, 1);
+  ctx.globalAlpha = a; ctx.textAlign = 'center';
+  ctx.font = '900 44px Cinzel, serif'; ctx.fillStyle = WHITE;
+  ctx.fillText(s.title, VW / 2, VH * 0.68);
+  ctx.font = '19px "Special Elite", monospace'; ctx.fillStyle = '#bdbdbd';
+  ctx.fillText(s.sub, VW / 2, VH * 0.68 + 34);
+  ctx.font = '15px "Special Elite", monospace'; ctx.fillStyle = '#8a8a8a';
+  ctx.fillText(`+${BLADE_BONUS} damage on every hit  ·  longer reach`, VW / 2, VH * 0.68 + 60);
+  ctx.globalAlpha = 1; ctx.textAlign = 'left';
+}
+
 function drawCine() {
   const s = cine.shots[cine.i], t = cine.t;
   ctx.save();
@@ -1749,6 +1847,7 @@ function drawCine() {
     case 'eyes': drawEyesShot(s, t); break;
     case 'split': drawSplitShot(s, t); break;
     case 'impact': drawImpact(s, t); break;
+    case 'item': drawItemShot(s, t); break;
   }
   ctx.restore();
 
@@ -1980,6 +2079,22 @@ function details(sk, L, face, opts) {
     ctx.fillStyle = '#9a9a9a'; circle(0, 0, 2.5 * k);
     ctx.restore();
   }
+  if (opts.blade) {
+    // A straight sword held in the front hand, following the forearm
+    const arm = sk.armF, ang = Math.atan2(arm.ey - arm.ky, arm.ex - arm.kx);
+    const cos = Math.cos(ang), sin = Math.sin(ang);
+    const gx = arm.ex + cos * 4, gy = arm.ey + sin * 4;
+    ctx.strokeStyle = '#8a8a8a'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(gx - sin * 7, gy + cos * 7); ctx.lineTo(gx + sin * 7, gy - cos * 7); ctx.stroke();
+    ctx.fillStyle = WHITE;
+    ctx.beginPath();
+    ctx.moveTo(gx - sin * 2.4, gy + cos * 2.4);
+    ctx.lineTo(gx + cos * 40 - sin * 1.4, gy + sin * 40 + cos * 1.4);
+    ctx.lineTo(gx + cos * 47, gy + sin * 47);
+    ctx.lineTo(gx + cos * 40 + sin * 1.4, gy + sin * 40 - cos * 1.4);
+    ctx.lineTo(gx + sin * 2.4, gy - cos * 2.4);
+    ctx.closePath(); ctx.fill();
+  }
   if (opts.claws) {
     ctx.strokeStyle = WHITE; ctx.lineWidth = 2.5;
     for (const arm of [sk.armF, sk.armB]) {
@@ -1996,11 +2111,35 @@ function details(sk, L, face, opts) {
   }
 }
 
+// Hornet's insect wings: pale, veined and buzzing, drawn behind the body
+function drawWings(x, y, sk, face, s, pose) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (pose.rot) { ctx.rotate(pose.rot * face); }
+  ctx.scale(s, s);
+  const bx = sk.sh.x - face * 4, by = sk.sh.y + 4;
+  const buzz = Math.sin(game.t * 70) * 0.18;
+  for (const [lift, len, alpha] of [[0.55, 78, 0.32], [0.15, 64, 0.24]]) {
+    ctx.save();
+    ctx.translate(bx, by);
+    // Point up and away from the way he's facing
+    const a = lift + buzz;
+    ctx.rotate(face > 0 ? Math.PI + a : -a);
+    ctx.fillStyle = `rgba(230,230,230,${alpha})`;
+    ctx.strokeStyle = 'rgba(242,242,242,0.6)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(len / 2, 0, len / 2, len * 0.16, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(len - 6, 0); ctx.moveTo(len * 0.3, 0); ctx.lineTo(len * 0.6, -len * 0.1); ctx.moveTo(len * 0.5, 0); ctx.lineTo(len * 0.8, len * 0.08); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 // Two passes: a light copy nudged toward the moon, then the black body on top,
 // which leaves a thin rim of moonlight along the figure's edge
 function drawFigure(x, y, face, pose, look, opts = {}) {
   const s = look.scale;
   const sk = skeleton(pose, face);
+  if (opts.wings) drawWings(x, y, sk, face, s, pose);
   ctx.save();
   if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
   for (let pass = 0; pass < 2; pass++) {
@@ -2040,6 +2179,7 @@ const P = {
   hurt: () => ({ lean: -0.35, head: -0.3, armF: [-0.6, 0.4], armB: [-0.9, 0.6], legF: [0.3, -0.2], legB: [-0.3, -0.1] }),
   limp: () => ({ lean: 0, armF: [0.3, 0.2], armB: [-0.3, 0.3], legF: [0.1, -0.05], legB: [-0.1, -0.05] }),
   tuck: () => ({ lean: 0.4, bob: 26, armF: [1.4, 1.6], armB: [1.2, 1.8], legF: [1.6, -2.4], legB: [1.3, -2.2] }),
+  crouch: () => ({ lean: 0.45, bob: 22, head: 0.2, armF: [1.0, 1.4], armB: [0.8, 1.6], legF: [0.9, -1.6], legB: [-0.1, -1.3] }),
   kneel: () => ({ lean: 0.18, bob: 43, armF: [-0.5, 0.5], armB: [-0.6, 0.4], legF: [1.0, -2.5], legB: [0.3, -1.8] }),
   sit: t => ({ lean: 0.05, bob: 62, head: 0.15, armF: [0.9, 0.5 + Math.sin(t) * 0.05], armB: [0.8, 0.6], legF: [1.55, -1.55], legB: [1.45, -1.45] }),
   stand: t => ({ lean: 0.02, bob: Math.sin(t * 2) * 1, armF: [0.15, 0.3], armB: [-0.1, 0.3], legF: [0.06, -0.02], legB: [-0.06, -0.02] }),
@@ -2047,6 +2187,29 @@ const P = {
   pray: t => ({ lean: 0.12, bob: Math.sin(t * 3) * 1, armF: [1.85 + Math.sin(t * 4) * 0.05, 2.75], armB: [1.6, 2.8], legF: [0.06, -0.02], legB: [-0.06, -0.02] }),
   strike: () => ({ lean: 0.55, armF: [1.65, 0.05], armB: [1.5, 0.1], legF: [0.7, -0.2], legB: [-0.6, -0.1] }),
 };
+
+// Blend two poses (numbers and [angle, angle] pairs) by k = 0..1
+function blendPose(a, b, k) {
+  const out = {};
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const va = a[key] ?? (Array.isArray(b[key]) ? b[key] : 0);
+    const vb = b[key] ?? (Array.isArray(a[key]) ? a[key] : 0);
+    out[key] = Array.isArray(va) ? va.map((v, i) => lerp(v, vb[i], k)) : lerp(va, vb, k);
+  }
+  return out;
+}
+
+function dodgePose(t) {
+  const { crouch, roll, rise } = DODGE;
+  if (t < crouch) return blendPose(P.idle(0), P.crouch(), ease(t / crouch));
+  if (t < crouch + roll) {
+    // Ease in and out of the spin so it reads as one smooth tumble
+    const k = (t - crouch) / roll;
+    const spin = k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) * (1 - k);
+    return { ...P.tuck(), rot: spin * Math.PI * 2, rotY: -38 };
+  }
+  return blendPose(P.crouch(), P.idle(0), ease(Math.min(1, (t - crouch - roll) / rise)));
+}
 
 function playerPose(p) {
   const t = game.t;
@@ -2070,7 +2233,7 @@ function playerPose(p) {
       const k = clamp((u - 0.5) / 0.2, 0, 1);
       return { lean: lerp(-0.25, 0.5, k), armF: [lerp(3.0, 1.2, k), lerp(0.3, 0, k)], armB: [lerp(2.8, 1.0, k), 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
     }
-    case 'dodge': return { ...P.tuck(), rot: (p.t / 0.36) * Math.PI * 2, rotY: -40 };
+    case 'dodge': return dodgePose(p.t);
     case 'hurt': return P.hurt();
     case 'dying': case 'fallen': return { ...P.limp(), rot: -Math.PI / 2 * Math.min(1, p.t / 0.4) };
   }
@@ -2087,16 +2250,23 @@ function enemyPose(e) {
   if (e.state === 'windup') {
     if (e.kind === 'throw') return { lean: -0.1, armF: [lerp(0.4, -2.3, u), 0.6], armB: [0.5, 1.5], legF: [0.3, -0.1], legB: [-0.3, -0.05] };
     if (e.kind === 'dash') return { lean: 0.5, armF: [-1.0, 0.5], armB: [-1.2, 0.5], legF: [0.8, -0.6], legB: [-0.7, -0.3] };
+    if (e.kind === 'dive') return { ...P.crouch(), armF: [-0.8, 0.6], armB: [-1.0, 0.6] };
     if (e.kind === 'slam') return { lean: -0.2 * u, armF: [lerp(0.5, 2.9, u), 0.3], armB: [lerp(0.3, 2.7, u), 0.4], legF: [0.35, -0.15], legB: [-0.35, -0.05] };
     return { lean: -0.12 * u, armF: [lerp(0.5, -0.8, u), 1.7], armB: e.T.shield ? [0.4, 2.0] : [0.4, 2.0], legF: [0.3, -0.1], legB: [-0.3, -0.05] };
   }
   if (e.state === 'attack') {
     if (e.kind === 'throw') return { lean: 0.25, armF: [1.4, 0.2], armB: [0.2, 1.5], legF: [0.4, -0.1], legB: [-0.4, -0.05] };
     if (e.kind === 'dash') return { ...P.run(t * 1.6), lean: 0.6, armF: [1.5, 0], armB: [1.3, 0.1] };
+    if (e.kind === 'dive') return e.vy < 0 ? { ...P.air(), armF: [2.8, 0.3], armB: [2.6, 0.4] } : { ...P.air(), lean: 0.4, armF: [1.2, 0], armB: [1.0, 0.1] };
     if (e.kind === 'slam') return { lean: 0.45, armF: [1.0, 0], armB: [0.9, 0.1], legF: [0.5, -0.25], legB: [-0.4, -0.05] };
     return { lean: 0.3, armF: [1.6, 0], armB: [0.3, 2.0], legF: [0.45, -0.15], legB: [-0.35, -0.05] };
   }
   if (e.state === 'hurt') return P.hurt();
+  if (e.state === 'transform') {
+    // Roaring, arms thrown wide
+    const shake = Math.sin(game.t * 40) * 0.05;
+    return { lean: -0.3 + shake, head: -0.45, armF: [2.4, 0.5], armB: [2.2, 0.6], legF: [0.45, -0.2], legB: [-0.45, -0.1] };
+  }
   if (Math.abs(e.vx) > 5) return { ...P.run(t * (e.T.speed / 150)), ...shieldUp };
   return { ...P.idle(t), ...shieldUp };
 }
@@ -2277,6 +2447,36 @@ function drawProps() {
   }
 }
 
+// A "…" over anyone who wants to talk, and a prompt once Orans is close enough
+function drawTalkHints() {
+  const near = nearbyTalker();
+  for (const pr of props) {
+    if (!pr.scene || pr.talked) continue;
+    const top = GROUND - (pr.kind === 'oracle' ? 150 : 135);
+    const bob = Math.sin(game.t * 3) * 3;
+    if (pr !== near) {
+      ctx.fillStyle = WHITE;
+      for (let i = 0; i < 3; i++) circle(pr.x - 8 + i * 8, top - 14 + bob, 2.4);
+      continue;
+    }
+    const touch = document.body.classList.contains('touch');
+    const label = touch ? 'TALK' : 'Talk', key = touch ? '' : 'E';
+    ctx.font = '700 15px Cinzel, serif';
+    const tw = ctx.measureText(label).width;
+    const w = tw + (key ? 40 : 22), h = 30, x = pr.x - w / 2, y = top - 40 + bob;
+    ctx.fillStyle = 'rgba(10,10,10,0.85)'; ctx.strokeStyle = WHITE; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, 6) : ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+    ctx.textAlign = 'left'; ctx.fillStyle = WHITE;
+    if (key) {
+      ctx.fillStyle = WHITE; ctx.fillRect(x + 8, y + 6, 18, 18);
+      ctx.fillStyle = INK; ctx.font = '900 13px Cinzel, serif'; ctx.textAlign = 'center';
+      ctx.fillText(key, x + 17, y + 20);
+      ctx.textAlign = 'left'; ctx.font = '700 15px Cinzel, serif'; ctx.fillStyle = WHITE;
+      ctx.fillText(label, x + 32, y + 20);
+    } else ctx.fillText(label, x + 11, y + 20);
+  }
+}
+
 // ---- Rain, grain and vignette for the noir look ----
 const rain = Array.from({ length: 140 }, () => ({ x: rand(0, VW + 200), y: rand(-VH, VH), len: rand(10, 22), spd: rand(650, 950) }));
 function updateRain(dt) {
@@ -2387,6 +2587,7 @@ function drawWorld() {
   }
 
   drawProps();
+  if (game.state === 'play') drawTalkHints();
 
   // Mantis waits at the end of the road. When she reveals herself she grows taller.
   const mx = mantis.x - mantis.lunge * 70;
@@ -2405,7 +2606,14 @@ function drawWorld() {
   }
   for (const e of enemies) {
     if (e.dead) continue;
-    drawFigure(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { flash: e.flash > 0, glow: e.state === 'windup' });
+    if (e.kind === 'dive' && e.state === 'attack') {
+      // Where Hornet will land: get out of the circle
+      const pulse = 0.5 + Math.sin(game.t * 18) * 0.3;
+      ctx.strokeStyle = `rgba(242,242,242,${pulse})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(e.diveX, GROUND + 2, 70, 12, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(e.diveX, GROUND + 2, 30, 5, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    drawFigure(e.x, e.y, e.face, enemyPose(e), LOOKS[e.T.look], { flash: e.flash > 0, glow: e.state === 'windup' || e.state === 'transform', wings: e.phase2 });
     if (e.state === 'windup') {
       ctx.fillStyle = WHITE; ctx.font = '900 24px Cinzel, serif'; ctx.textAlign = 'center';
       ctx.fillText('!', e.x, e.y - e.T.h - 18);
@@ -2414,7 +2622,7 @@ function drawWorld() {
 
   const p = player;
   const blink = p.inv > 0 && p.state !== 'dodge' && p.state !== 'hurt' && Math.floor(game.t * 14) % 2 === 0;
-  drawFigure(p.x, p.y, p.face, playerPose(p), LOOKS.orans, { vx: p.vx, alpha: blink ? 0.4 : 1 });
+  drawFigure(p.x, p.y, p.face, playerPose(p), LOOKS.orans, { vx: p.vx, alpha: blink ? 0.4 : 1, blade: p.blade && p.state !== 'dodge' });
 
   // Slash arcs while an attack is active
   if (p.state === 'light' || p.state === 'heavy') {
@@ -2422,7 +2630,7 @@ function drawWorld() {
     if (p.t >= a.active[0] - 0.02 && p.t <= a.active[1] + 0.05) {
       ctx.strokeStyle = WHITE; ctx.lineWidth = p.state === 'heavy' ? 5 : 3;
       ctx.globalAlpha = 0.85;
-      const cx = p.x + p.face * 22, cy = p.y - 84, r = a.reach * 0.8;
+      const cx = p.x + p.face * 22, cy = p.y - 84, r = (a.reach + (p.blade ? 34 : 0)) * 0.8;
       const s0 = p.state === 'heavy' ? -1.4 : -0.7, s1 = p.state === 'heavy' ? 1.0 : 0.5;
       ctx.beginPath();
       if (p.face > 0) ctx.arc(cx, cy, r, s0, s1); else ctx.arc(cx, cy, r, Math.PI - s1, Math.PI - s0);
@@ -2508,7 +2716,7 @@ function drawHUD() {
   ctx.strokeStyle = WHITE; ctx.lineWidth = 1.5; ctx.strokeRect(x, by, bw, bh);
   ctx.fillStyle = '#bdbdbd'; ctx.font = '14px "Special Elite", monospace';
   ctx.fillText(`HP ${Math.ceil(Math.max(0, p.hp))}/${Math.ceil(p.maxHp)}`, x, by + 30);
-  ctx.fillText(`DMG ${p.dmg.toFixed(1)}`, x + 130, by + 30);
+  ctx.fillText(`DMG ${p.dmg.toFixed(1)}${p.blade ? ` + ${BLADE_BONUS} blade` : ''}`, x + 130, by + 30);
 
   // Progress: the O travels toward the M
   const tx = VW - 270, tw = 230, ty = 38;
@@ -2527,7 +2735,7 @@ function drawHUD() {
   if (bossRef && !bossRef.dead) {
     const w = 420, bx = (VW - w) / 2, byy = VH - 42;
     ctx.fillStyle = WHITE; ctx.font = '700 14px Cinzel, serif'; ctx.textAlign = 'center';
-    ctx.fillText(bossRef.phase2 ? 'THE WARDEN — ENRAGED' : 'THE WARDEN', VW / 2, byy - 8);
+    ctx.fillText(bossRef.phase2 ? 'HORNET — SECOND FORM' : 'HORNET, THE WARDEN', VW / 2, byy - 8);
     ctx.fillStyle = '#2a2a2a'; ctx.fillRect(bx, byy, w, 8);
     ctx.fillStyle = WHITE; ctx.fillRect(bx, byy, w * Math.max(0, bossRef.hp) / bossRef.T.hp, 8);
     ctx.strokeStyle = WHITE; ctx.lineWidth = 1; ctx.strokeRect(bx, byy, w, 8);
